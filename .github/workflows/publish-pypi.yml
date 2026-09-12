@@ -9,12 +9,10 @@
 # After a successful PyPI upload, the English notes become the GitHub Release
 # body, plus a link to CHANGELOG.zh.md on the same tag.
 #
-# PyPI auth (pick one):
-#   Trusted Publishing (preferred)
-#     https://pypi.org/manage/project/openwrt-cli/settings/publishing/
-#     Publisher: GitHub, owner Necho-dev, repo openwrt-cli,
-#     workflow publish-pypi.yml, environment pypi
-#   Or repository secret PYPI_API_TOKEN (pypi-... API token)
+# PyPI auth: Trusted Publishing (OIDC).
+#   https://pypi.org/manage/project/openwrt-cli/settings/publishing/
+#   Publisher: GitHub, owner Necho-dev, repo openwrt-cli,
+#   workflow publish-pypi.yml, environment pypi
 
 name: Publish
 
@@ -66,15 +64,7 @@ jobs:
       - name: Show dist
         run: ls -l dist
 
-      - name: Publish to PyPI (API token)
-        if: ${{ secrets.PYPI_API_TOKEN != '' }}
-        uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          packages-dir: dist
-          password: ${{ secrets.PYPI_API_TOKEN }}
-
-      - name: Publish to PyPI (trusted publishing)
-        if: ${{ secrets.PYPI_API_TOKEN == '' }}
+      - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: dist

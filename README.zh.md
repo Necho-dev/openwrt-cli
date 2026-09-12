@@ -12,22 +12,22 @@
 主命令是 **`openwrt`**。`openwrt-cli` 仍会作为兼容别名安装；文档与 `--help` 一律写 `openwrt`。
 
 <p align="center">
-  <img src="docs/assets/cli-banner.gif" alt="openwrt setup / tui / network interfaces / neighbors / leases" width="100%">
+  <img src="docs/assets/cli-banner.gif" alt="openwrt setup / tui / network interfaces / neighbors / leases" width="2000">
 </p>
 
 <p align="center">
-  <img src="docs/assets/tui-overview.png" alt="TUI Overview：负载、带宽与连接" width="900">
+  <img src="docs/assets/tui-overview.png" alt="TUI Overview：负载、带宽与连接" width="2000">
 </p>
 
 <table>
   <tr>
     <td align="center" valign="top" width="50%">
       <p><strong>网络</strong></p>
-      <img src="docs/assets/tui-network.png" alt="TUI 网络">
+      <img src="docs/assets/tui-network.png" alt="TUI 网络" width="2000">
     </td>
     <td align="center" valign="top" width="50%">
       <p><strong>邻居</strong></p>
-      <img src="docs/assets/tui-neighbors.png" alt="TUI 邻居">
+      <img src="docs/assets/tui-neighbors.png" alt="TUI 邻居" width="2000">
     </td>
   </tr>
 </table>
@@ -36,15 +36,15 @@
   <tr>
     <td align="center" valign="top" width="33%">
       <p><strong>服务</strong></p>
-      <img src="docs/assets/tui-services.png" alt="TUI 服务">
+      <img src="docs/assets/tui-services.png" alt="TUI 服务" width="2000">
     </td>
     <td align="center" valign="top" width="33%">
       <p><strong>进程</strong></p>
-      <img src="docs/assets/tui-process.png" alt="TUI 进程">
+      <img src="docs/assets/tui-process.png" alt="TUI 进程" width="2000">
     </td>
     <td align="center" valign="top" width="33%">
       <p><strong>日志</strong></p>
-      <img src="docs/assets/tui-logs.png" alt="TUI 日志">
+      <img src="docs/assets/tui-logs.png" alt="TUI 日志" width="2000">
     </td>
   </tr>
 </table>
@@ -74,7 +74,7 @@ openwrt -H 192.168.1.1 -u root --password your_password --save-config
 ```
 
 <p align="center">
-  <img src="docs/assets/cli-setup.png" alt="openwrt setup：语言与连接向导" width="900">
+  <img src="docs/assets/cli-setup.png" alt="openwrt setup：语言与连接向导" width="2000">
 </p>
 
 ## 安装

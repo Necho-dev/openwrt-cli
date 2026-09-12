@@ -12,22 +12,22 @@ Remote OpenWrt admin over **SSH** or **LuCI/ubus HTTP**. The same services power
 The command is **`openwrt`**. `openwrt-cli` is still installed as a compatibility alias; docs and `--help` always say `openwrt`.
 
 <p align="center">
-  <img src="docs/assets/cli-banner.gif" alt="openwrt setup / tui / network interfaces / neighbors / leases" width="100%">
+  <img src="docs/assets/cli-banner.gif" alt="openwrt setup / tui / network interfaces / neighbors / leases" width="2000">
 </p>
 
 <p align="center">
-  <img src="docs/assets/tui-overview.png" alt="TUI Overview — load, bandwidth, and connections" width="900">
+  <img src="docs/assets/tui-overview.png" alt="TUI Overview — load, bandwidth, and connections" width="2000">
 </p>
 
 <table>
   <tr>
     <td align="center" valign="top" width="50%">
       <p><strong>Network</strong></p>
-      <img src="docs/assets/tui-network.png" alt="TUI Network">
+      <img src="docs/assets/tui-network.png" alt="TUI Network" width="2000">
     </td>
     <td align="center" valign="top" width="50%">
       <p><strong>Neighbors</strong></p>
-      <img src="docs/assets/tui-neighbors.png" alt="TUI Neighbors">
+      <img src="docs/assets/tui-neighbors.png" alt="TUI Neighbors" width="2000">
     </td>
   </tr>
 </table>
@@ -36,15 +36,15 @@ The command is **`openwrt`**. `openwrt-cli` is still installed as a compatibilit
   <tr>
     <td align="center" valign="top" width="33%">
       <p><strong>Services</strong></p>
-      <img src="docs/assets/tui-services.png" alt="TUI Services">
+      <img src="docs/assets/tui-services.png" alt="TUI Services" width="2000">
     </td>
     <td align="center" valign="top" width="33%">
       <p><strong>Process</strong></p>
-      <img src="docs/assets/tui-process.png" alt="TUI Process">
+      <img src="docs/assets/tui-process.png" alt="TUI Process" width="2000">
     </td>
     <td align="center" valign="top" width="33%">
       <p><strong>Logs</strong></p>
-      <img src="docs/assets/tui-logs.png" alt="TUI Logs">
+      <img src="docs/assets/tui-logs.png" alt="TUI Logs" width="2000">
     </td>
   </tr>
 </table>
@@ -74,7 +74,7 @@ openwrt -H 192.168.1.1 -u root --password your_password --save-config
 ```
 
 <p align="center">
-  <img src="docs/assets/cli-setup.png" alt="openwrt setup — language and connection wizard" width="900">
+  <img src="docs/assets/cli-setup.png" alt="openwrt setup — language and connection wizard" width="2000">
 </p>
 
 ## Installation

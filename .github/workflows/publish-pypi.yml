@@ -1,0 +1,91 @@
+# Publish a wheel to PyPI and create a GitHub Release when a version tag is pushed (v1.2.3).
+#
+# After Unit Test succeeds, and before the wheel is built:
+#   1. Tag (without leading v) must match [project].version in pyproject.toml
+#   2. That version must not already exist on PyPI
+#   3. CHANGELOG.md and CHANGELOG.zh.md must list the same ## [X.Y.Z] versions,
+#      each with complete notes for this tag
+#
+# After a successful PyPI upload, the English notes become the GitHub Release
+# body, plus a link to CHANGELOG.zh.md on the same tag.
+#
+# PyPI auth (pick one):
+#   Trusted Publishing (preferred)
+#     https://pypi.org/manage/project/openwrt-cli/settings/publishing/
+#     Publisher: GitHub, owner Necho-dev, repo openwrt-cli,
+#     workflow publish-pypi.yml, environment pypi
+#   Or repository secret PYPI_API_TOKEN (pypi-... API token)
+
+name: Publish
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-pypi-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  test:
+    uses: ./.github/workflows/unit-test.yml
+
+  publish:
+    name: Build wheel and publish
+    needs: test
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/openwrt-cli/
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Poetry
+        run: pip install poetry
+
+      - name: Check tag, PyPI, and release notes
+        id: preflight
+        env:
+          GITHUB_REF_NAME: ${{ github.ref_name }}
+        run: python .github/scripts/release_preflight.py
+
+      - name: Build wheel
+        run: poetry build -f wheel
+
+      - name: Show dist
+        run: ls -l dist
+
+      - name: Publish to PyPI (API token)
+        if: ${{ secrets.PYPI_API_TOKEN != '' }}
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist
+          password: ${{ secrets.PYPI_API_TOKEN }}
+
+      - name: Publish to PyPI (trusted publishing)
+        if: ${{ secrets.PYPI_API_TOKEN == '' }}
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          version="${{ steps.preflight.outputs.version }}"
+          gh release create "$GITHUB_REF_NAME" dist/*.whl \
+            --title "openwrt-cli ${version}" \
+            --notes-file release-notes.md \
+            --verify-tag

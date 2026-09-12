@@ -4,6 +4,8 @@
 
 [![Python](https://img.shields.io/badge/Python-3.12+-blue.svg)](https://www.python.org/)
 [![Unit Test](https://github.com/Necho-dev/openwrt-cli/actions/workflows/unit-test.yml/badge.svg)](https://github.com/Necho-dev/openwrt-cli/actions/workflows/unit-test.yml)
+[![Publish](https://github.com/Necho-dev/openwrt-cli/actions/workflows/publish-pypi.yml/badge.svg)](https://github.com/Necho-dev/openwrt-cli/actions/workflows/publish-pypi.yml)
+[![PyPI](https://img.shields.io/pypi/v/openwrt-cli.svg)](https://pypi.org/project/openwrt-cli/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![GitHub](https://img.shields.io/badge/GitHub-Necho--dev%2Fopenwrt--cli-181717.svg)](https://github.com/Necho-dev/openwrt-cli)
 
@@ -115,6 +117,8 @@ OPENWRT_LIVE=1 poetry run pytest -m live  # read-only against ~/.openwrt-cli.yam
 ```
 
 Destructive commands (reboot, reload, service restart, …) are not in the live set.
+
+**Release** — bump `[project].version` in `pyproject.toml`, add a matching `## [x.y.z]` section to both [CHANGELOG.md](CHANGELOG.md) and [CHANGELOG.zh.md](CHANGELOG.zh.md), then tag `vx.y.z` and push the tag. The publish workflow runs unit tests, checks the tag against `pyproject.toml` and PyPI (refuses a version that already exists), requires the two changelogs to list the same versions, builds the wheel, uploads it, and opens a GitHub Release from the English notes (with a link to the Chinese changelog).
 
 ## Command Overview
 
@@ -290,6 +294,16 @@ openwrt --https system status
 openwrt -L zh doctor
 openwrt config set --language zh
 ```
+
+## Acknowledgments
+
+This project talks to OpenWrt through the official stack:
+
+- [openwrt/openwrt](https://github.com/openwrt/openwrt) — the OpenWrt operating system
+- [openwrt/luci](https://github.com/openwrt/luci) — LuCI web interface and ubus/HTTP API
+- [openwrt/uci](https://github.com/openwrt/uci) — Unified Configuration Interface
+
+Thanks to [a6726170/openwrt-cli](https://github.com/a6726170/openwrt-cli) for the original inspiration.
 
 ## License
 

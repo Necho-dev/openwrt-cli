@@ -4,6 +4,8 @@
 
 [![Python](https://img.shields.io/badge/Python-3.12+-blue.svg)](https://www.python.org/)
 [![Unit Test](https://github.com/Necho-dev/openwrt-cli/actions/workflows/unit-test.yml/badge.svg)](https://github.com/Necho-dev/openwrt-cli/actions/workflows/unit-test.yml)
+[![Publish](https://github.com/Necho-dev/openwrt-cli/actions/workflows/publish-pypi.yml/badge.svg)](https://github.com/Necho-dev/openwrt-cli/actions/workflows/publish-pypi.yml)
+[![PyPI](https://img.shields.io/pypi/v/openwrt-cli.svg)](https://pypi.org/project/openwrt-cli/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![GitHub](https://img.shields.io/badge/GitHub-Necho--dev%2Fopenwrt--cli-181717.svg)](https://github.com/Necho-dev/openwrt-cli)
 
@@ -115,6 +117,8 @@ OPENWRT_LIVE=1 poetry run pytest -m live  # 只读实机，读 ~/.openwrt-cli.ya
 ```
 
 破坏性命令（reboot、reload、service restart 等）不在实机集里。
+
+**发布** — 先改 `pyproject.toml` 的 `[project].version`，在 [CHANGELOG.md](CHANGELOG.md) 和 [CHANGELOG.zh.md](CHANGELOG.zh.md) 写好同一节 `## [x.y.z]`，再打 `vx.y.z` 并推送 tag。发布工作流会先跑单测，再核对 tag 与 `pyproject.toml`、确认 PyPI 上没有该版本、并要求中英文 Changelog 版本号对齐，然后打包上传；GitHub Release 用英文说明，并附上中文 Changelog 链接。
 
 ## Command 概览
 
@@ -290,6 +294,16 @@ openwrt --https system status
 openwrt -L zh doctor
 openwrt config set --language zh
 ```
+
+## 鸣谢
+
+本项目通过官方栈与 OpenWrt 交互：
+
+- [openwrt/openwrt](https://github.com/openwrt/openwrt) — OpenWrt 操作系统
+- [openwrt/luci](https://github.com/openwrt/luci) — LuCI Web 界面与 ubus/HTTP API
+- [openwrt/uci](https://github.com/openwrt/uci) — 统一配置接口（UCI）
+
+鸣谢 [a6726170/openwrt-cli](https://github.com/a6726170/openwrt-cli) 提供的灵感。
 
 ## 许可证
 

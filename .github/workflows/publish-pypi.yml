@@ -58,6 +58,12 @@ jobs:
           GITHUB_REF_NAME: ${{ github.ref_name }}
         run: python .github/scripts/release_preflight.py
 
+      - name: Rewrite README asset URLs for PyPI
+        env:
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_REF_NAME: ${{ github.ref_name }}
+        run: python .github/scripts/readme_pypi_urls.py
+
       - name: Build wheel
         run: poetry build -f wheel
 

@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import sys
@@ -104,19 +105,29 @@ def pypi_has_version(version: str) -> None:
     request = Request(url, headers={"Accept": "application/json", "User-Agent": USER_AGENT})
     try:
         with urlopen(request, timeout=30) as response:
-            if response.status == 200:
-                fail(
-                    f"{PROJECT} {version} is already on PyPI "
-                    f"(https://pypi.org/project/{PROJECT}/{version}/). "
-                    "Bump the version; do not republish."
-                )
-            fail(f"Unexpected PyPI response HTTP {response.status} for {url}")
+            raw = response.read()
+            status = response.status
     except HTTPError as exc:
         if exc.code == 404:
             return
         fail(f"PyPI version check failed: HTTP {exc.code} for {url}")
     except URLError as exc:
         fail(f"PyPI version check failed: {exc}")
+    else:
+        if status != 200:
+            fail(f"Unexpected PyPI response HTTP {status} for {url}")
+        try:
+            payload = json.loads(raw.decode("utf-8"))
+        except json.JSONDecodeError:
+            fail(f"PyPI version check failed: invalid JSON from {url}")
+        if payload.get("message") == "Not Found":
+            return
+        if payload.get("info", {}).get("version") == version:
+            fail(
+                f"{PROJECT} {version} is already on PyPI "
+                f"(https://pypi.org/project/{PROJECT}/{version}/). "
+                "Bump the version; do not republish."
+            )
 
 
 def write_output(version: str) -> None:

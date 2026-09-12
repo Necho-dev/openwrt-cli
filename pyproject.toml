@@ -1,7 +1,7 @@
 [project]
 name = "openwrt-cli"
 version = "1.0.1"
-description = "OpenWrt CLI 管理工具"
+description = "OpenWrt CLI&TUI for AI Agent."
 readme = "README.md"
 license = { file = "LICENSE" }
 requires-python = ">=3.12,<4"

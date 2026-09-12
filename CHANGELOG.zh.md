@@ -7,6 +7,13 @@
 打 `vX.Y.Z` 标签前，**本文件与** [CHANGELOG.md](CHANGELOG.md) **必须有同一节** `## [X.Y.Z]`。
 GitHub Release 正文使用英文，并附上本节的链接。
 
+## [1.0.2] - 2026-09-13
+
+打包修复。**1.0.1** 曾经上传后又删除；PyPI 不允许再次使用同一文件名（`openwrt_cli-1.0.1-py3-none-any.whl`），因此本版本为 **1.0.2**。功能与 1.0.1 相同。
+
+- 发布打包时会把 README 里的 `docs/assets/` 图片改成 GitHub raw 地址，[PyPI 项目页](https://pypi.org/project/openwrt-cli/) 才能显示截图。仓库内 README 仍用相对路径。
+- 安装：`pipx install openwrt-cli`（需要 Python >= 3.12）。
+
 ## [1.0.1] - 2026-09-12
 
 **OpenWrt CLI** 的首个公开版本。本仓库没有更早的 1.0.0 标签，`1.0.1` 就是第一次正式发版。

@@ -11,6 +11,13 @@ A `vX.Y.Z` tag is published only when **both** this file and
 [CHANGELOG.zh.md](CHANGELOG.zh.md) have a matching `## [X.Y.Z]` section.
 The English section becomes the GitHub Release body, with a link to the Chinese notes.
 
+## [1.0.2] - 2026-09-13
+
+Packaging fix for PyPI. Version **1.0.1** was uploaded then deleted; PyPI never reuses a filename (`openwrt_cli-1.0.1-py3-none-any.whl`), so this release is **1.0.2**. Product features are the same as 1.0.1.
+
+- Wheel README rewrites `docs/assets/` image URLs to GitHub raw links at publish time so the [PyPI page](https://pypi.org/project/openwrt-cli/) can show screenshots. The repository README stays on relative paths.
+- Install: `pipx install openwrt-cli` (requires Python >= 3.12).
+
 ## [1.0.1] - 2026-09-12
 
 First public release of **OpenWrt CLI**. There is no prior 1.0.0 on this repository — `1.0.1` is the initial tagged package.

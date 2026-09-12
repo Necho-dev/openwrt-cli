@@ -305,7 +305,7 @@
   "proc.fallback": "进程",
   "label.unknown": "未知",
   "help.app": "OpenWrt CLI 管理工具 — 监控 / 网络 / 系统 / 向导 / TUI",
-  "help.app.cb": "全局连接与输出选项。也可用在子命令之后，例如 [bold]openwrt network leases -f json[/bold]。",
+  "help.app.cb": "全局连接与输出选项。也可用在子命令之后，例如 [bold]openwrt network leases --json[/bold]。",
   "help.opt.host": "设备 IP",
   "help.opt.user": "用户名",
   "help.opt.port": "连接端口（SSH 22 / HTTP 80 / HTTPS 443）",

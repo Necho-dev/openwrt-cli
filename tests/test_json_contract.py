@@ -1,12 +1,18 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
+from typer.main import get_command
 from typer.testing import CliRunner
 
 from openwrt_cli.app import app, hoist_global_options
 from openwrt_cli.version import package_version
+
+
+def _plain(text: str) -> str:
+    return re.sub(r"\x1b\[[0-9;]*[mK]", "", text)
 
 runner = CliRunner()
 
@@ -69,9 +75,12 @@ def _empty_config(tmp_path: Path) -> Path:
 
 
 def test_help_lists_json_flag():
+    opts = [name for p in get_command(app).params for name in (*p.opts, *p.secondary_opts)]
+    assert "--json" in opts
     result = runner.invoke(app, ["--help"])
     assert result.exit_code == 0
-    assert "--json" in result.stdout
+    collapsed = re.sub(r"\s+", "", _plain(result.stdout))
+    assert "--json" in collapsed or "--[no-]json" in collapsed
 
 
 def test_version_json_object():

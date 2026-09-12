@@ -33,10 +33,9 @@ def detect_system_language() -> str:
     try:
         import locale
 
-        for candidate in (locale.getlocale()[0], locale.getdefaultlocale()[0]):
-            found = normalize_language(candidate)
-            if found:
-                return found
+        found = normalize_language(locale.getlocale()[0])
+        if found:
+            return found
     except Exception:
         pass
     return DEFAULT_LANG

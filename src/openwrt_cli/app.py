@@ -202,7 +202,7 @@ app.add_typer(doctor_app, name="doctor", help=_("help.doctor"))
 register_logs(app)
 
 
-@app.callback()
+@app.callback(help=_("help.app.cb"))
 def root(
     ctx: typer.Context,
     host: Annotated[str | None, typer.Option("-H", "--host", help=_("help.opt.host"))] = None,
@@ -231,7 +231,6 @@ def root(
         typer.Option("--version", "-v", help=_("help.opt.version"), callback=_show_version, is_eager=True),
     ] = False,
 ) -> None:
-    """Global connection and output options."""
     if json_out:
         format = "json"
     if format not in ("text", "json", "compact"):

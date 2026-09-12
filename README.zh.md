@@ -1,7 +1,3 @@
-<p align="center">
-  <img src="docs/assets/logo.svg" alt="OpenWRT" width="440">
-</p>
-
 # OpenWrt CLI
 
 [English](README.md) | **简体中文**
@@ -16,7 +12,7 @@
 主命令是 **`openwrt`**。`openwrt-cli` 仍会作为兼容别名安装；文档与 `--help` 一律写 `openwrt`。
 
 <p align="center">
-  <img src="docs/assets/cli-banner.gif" alt="openwrt setup / tui / network interfaces / neighbors / leases" width="800">
+  <img src="docs/assets/cli-banner.gif" alt="openwrt setup / tui / network interfaces / neighbors / leases" width="100%">
 </p>
 
 <p align="center">
@@ -124,9 +120,24 @@ OPENWRT_LIVE=1 poetry run pytest -m live  # 只读实机，读 ~/.openwrt-cli.ya
 
 全局选项可以写在子命令前或后（`openwrt network leases -f json`）。完整帮助见 `openwrt --help` 和 `openwrt <group> --help`。
 
-**全局** — `-H/--host`、`-u/--user`、`-p/--port`、`-i/--identity-file`、`--password`、`--ssh` / `--http` / `--https`、`-f text|json|compact`、`--json`、`--yes` / `-y`、`-L en|zh`。
+| 选项 | 说明 |
+|------|------|
+| `-H`, `--host` | 设备 IP |
+| `-u`, `--user` | 用户名 |
+| `-p`, `--port` | 端口（SSH 22 / HTTP 80 / HTTPS 443） |
+| `-i`, `--identity-file` | SSH 私钥路径（等同 `ssh -i`） |
+| `--password` | 登录密码 |
+| `--ssh` | SSH 连接 |
+| `--http` | LuCI/ubus HTTP |
+| `--https` | LuCI/ubus HTTPS |
+| `--config` | 配置文件路径 |
+| `-L`, `--language` | 界面语言：`en` / `zh` |
+| `-f`, `--format` | 输出格式：`text` / `json` / `compact` |
+| `--json` | 等同 `-f json`，供 Agent 使用 |
+| `--yes`, `-y` | 跳过确认 |
+| `-v`, `--version` | 显示版本后退出 |
 
-`--json` 与 `-f json` 相同。成功和失败都是带 `ok` 的同一个对象。交互命令（`setup`、`tui`、`wizard`）拒绝 JSON（`error: interactive`）。破坏性操作在 TTY 会提问；管道或 JSON 模式下必须加 `--yes`，否则退出码 `2`。
+成功和失败都是带 `ok` 的同一个对象。交互命令（`setup`、`tui`、`wizard`）拒绝 JSON（`error: interactive`）。破坏性操作在 TTY 会提问；管道或 JSON 模式下必须加 `--yes`，否则退出码 `2`。
 
 ### doctor / system / logs
 

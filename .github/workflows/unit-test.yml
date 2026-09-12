@@ -21,4 +21,8 @@ jobs:
       - name: Install
         run: poetry install --with dev
       - name: Unit tests
+        env:
+          COLUMNS: "80"
+          TERMINAL_WIDTH: "80"
+          TERM: xterm-256color
         run: poetry run pytest -m "not live"

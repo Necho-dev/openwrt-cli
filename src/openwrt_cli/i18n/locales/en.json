@@ -305,7 +305,7 @@
   "proc.fallback": "Process",
   "label.unknown": "unknown",
   "help.app": "OpenWrt CLI — monitor, network, system, wizard, and TUI",
-  "help.app.cb": "Global connection and output options. Also valid after a subcommand, e.g. [bold]openwrt network leases -f json[/bold].",
+  "help.app.cb": "Global connection and output options. Also valid after a subcommand, e.g. [bold]openwrt network leases --json[/bold].",
   "help.opt.host": "Device IP",
   "help.opt.user": "Username",
   "help.opt.port": "Port (SSH 22 / HTTP 80 / HTTPS 443)",

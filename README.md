@@ -1,7 +1,3 @@
-<p align="center">
-  <img src="docs/assets/logo.svg" alt="OpenWRT" width="440">
-</p>
-
 # OpenWrt CLI
 
 **English** | [简体中文](README.zh.md)
@@ -16,7 +12,7 @@ Remote OpenWrt admin over **SSH** or **LuCI/ubus HTTP**. The same services power
 The command is **`openwrt`**. `openwrt-cli` is still installed as a compatibility alias; docs and `--help` always say `openwrt`.
 
 <p align="center">
-  <img src="docs/assets/cli-banner.gif" alt="openwrt setup / tui / network interfaces / neighbors / leases" width="800">
+  <img src="docs/assets/cli-banner.gif" alt="openwrt setup / tui / network interfaces / neighbors / leases" width="100%">
 </p>
 
 <p align="center">
@@ -124,9 +120,24 @@ Destructive commands (reboot, reload, service restart, …) are not in the live 
 
 Flags may sit before or after a subcommand (`openwrt network leases -f json`). Full help: `openwrt --help` and `openwrt <group> --help`.
 
-**Globals** — `-H/--host`, `-u/--user`, `-p/--port`, `-i/--identity-file`, `--password`, `--ssh` / `--http` / `--https`, `-f text|json|compact`, `--json`, `--yes` / `-y`, `-L en|zh`.
+| Option | Description |
+|--------|-------------|
+| `-H`, `--host` | Device IP |
+| `-u`, `--user` | Username |
+| `-p`, `--port` | Port (SSH 22 / HTTP 80 / HTTPS 443) |
+| `-i`, `--identity-file` | SSH private key path (same as `ssh -i`) |
+| `--password` | Login password |
+| `--ssh` | Connect over SSH |
+| `--http` | LuCI/ubus HTTP |
+| `--https` | LuCI/ubus HTTPS |
+| `--config` | Config file path |
+| `-L`, `--language` | UI language: `en` / `zh` |
+| `-f`, `--format` | Output format: `text` / `json` / `compact` |
+| `--json` | Same as `-f json`; Agent-friendly |
+| `--yes`, `-y` | Skip confirmation |
+| `-v`, `--version` | Show version and exit |
 
-`--json` is the same as `-f json`. Success and failure are one object with `ok`. Interactive commands (`setup`, `tui`, `wizard`) refuse JSON (`error: interactive`). Destructive actions prompt on a TTY; in a pipe or JSON mode they need `--yes` or they exit `2`.
+Success and failure are one object with `ok`. Interactive commands (`setup`, `tui`, `wizard`) refuse JSON (`error: interactive`). Destructive actions prompt on a TTY; in a pipe or JSON mode they need `--yes` or they exit `2`.
 
 ### doctor / system / logs
 

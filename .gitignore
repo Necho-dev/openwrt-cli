@@ -1,0 +1,45 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+*.egg
+*.whl
+
+# Virtual env
+venv/
+env/
+.venv/
+
+# Poetry
+poetry.toml
+
+# uv — this repo uses Poetry for version / deps / lock
+uv.lock
+.uv/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# 本地配置（不要提交）
+*.yaml  # 用户配置含密码
+*.yml
+!.openwrt-cli.yaml.example
+!.github/workflows/*.yml
+
+# 测试
+.pytest_cache/
+.coverage
+htmlcov/
+
+# 临时文件
+*.tmp
+*.log

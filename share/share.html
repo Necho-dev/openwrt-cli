@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OpenWRT · CLI / TUI</title>
+<style>
+  :root {
+    --bg: #0e1419;
+    --surface: #161616;
+    --panel: #121820;
+    --border: #2a4660;
+    --header: #16324d;
+    --cursor: #1e4a7a;
+    --accent: #7ec8ff;
+    --accent-dim: #4c8dff;
+    --ok: #67c23a;
+    --wan: #f0a000;
+    --muted: #8aa0b4;
+    --text: #e6edf3;
+    --mono: "SFMono-Regular", "Cascadia Code", ui-monospace, Consolas, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: var(--sans);
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px 16px;
+  }
+  .shell {
+    width: 100%;
+    max-width: 640px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    overflow: hidden;
+    box-shadow: 0 24px 64px rgba(0, 0, 0, 0.45);
+  }
+  .brand {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 16px;
+    padding: 20px 22px 14px;
+    background: var(--header);
+    border-bottom: 1px solid var(--border);
+  }
+  .logo {
+    font-family: var(--mono);
+    font-size: 13px;
+    line-height: 1.2;
+    color: var(--accent);
+    white-space: pre;
+    font-weight: 600;
+    letter-spacing: 0;
+    font-variant-ligatures: none;
+    font-feature-settings: "liga" 0, "calt" 0;
+  }
+  .lang {
+    display: flex;
+    gap: 0;
+    border: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  .lang button {
+    background: transparent;
+    border: 0;
+    color: var(--muted);
+    font-family: var(--mono);
+    font-size: 11px;
+    padding: 4px 10px;
+    cursor: pointer;
+  }
+  .lang button.active {
+    background: var(--cursor);
+    color: #fff;
+  }
+  .sub {
+    color: var(--muted);
+    font-size: 13px;
+    padding: 12px 22px 0;
+    line-height: 1.55;
+  }
+  .tabs {
+    display: flex;
+    margin: 18px 22px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .tab {
+    padding: 8px 16px 10px;
+    font-size: 13px;
+    color: var(--muted);
+    cursor: pointer;
+    border: 0;
+    background: transparent;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+    font-family: inherit;
+  }
+  .tab.active {
+    color: var(--accent);
+    font-weight: 600;
+    border-bottom-color: var(--accent-dim);
+  }
+  .panel { display: none; padding: 14px 22px 0; }
+  .panel.active { display: block; }
+  .label {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--muted);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    margin-bottom: 8px;
+  }
+  .cmd {
+    position: relative;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    padding: 12px 72px 12px 14px;
+    font-family: var(--mono);
+    font-size: 12.5px;
+    color: var(--accent);
+    word-break: break-all;
+    cursor: pointer;
+    line-height: 1.5;
+  }
+  .cmd:hover { border-color: var(--accent-dim); }
+  .cmd.copied { border-color: var(--ok); }
+  .cmd .hint {
+    position: absolute;
+    right: 12px;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 11px;
+    color: var(--muted);
+    pointer-events: none;
+    white-space: nowrap;
+  }
+  .cmd.copied .hint { color: var(--ok); }
+  .features {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    padding: 18px 22px 0;
+  }
+  .feature {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    padding: 10px 12px;
+    font-size: 13px;
+    color: var(--muted);
+  }
+  .feature b {
+    display: block;
+    color: var(--accent);
+    font-size: 12px;
+    font-weight: 600;
+    margin-bottom: 2px;
+    font-family: var(--mono);
+  }
+  .next {
+    margin: 18px 22px 0;
+    padding: 14px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+  }
+  .next .row {
+    font-family: var(--mono);
+    font-size: 12.5px;
+    color: var(--accent);
+    line-height: 1.7;
+  }
+  .next .row span { color: var(--muted); }
+  .links {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 16px 22px 20px;
+    margin-top: 8px;
+  }
+  .links a {
+    color: var(--accent);
+    text-decoration: none;
+    font-size: 13px;
+  }
+  .links a:hover { text-decoration: underline; }
+  .gh {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--cursor);
+    color: #fff;
+    border: 1px solid var(--border);
+    padding: 8px 14px;
+    font-size: 13px;
+    font-weight: 600;
+    text-decoration: none !important;
+  }
+  .gh:hover { background: #245a94; }
+  .note {
+    padding: 0 22px 16px;
+    font-size: 12px;
+    color: var(--muted);
+    line-height: 1.55;
+  }
+  .note code { color: var(--accent); font-family: var(--mono); }
+  @media (max-width: 520px) {
+    .features { grid-template-columns: 1fr; }
+    .logo { font-size: 10px; }
+    .cmd { font-size: 11.5px; padding-right: 64px; }
+  }
+</style>
+</head>
+<body>
+<div class="shell">
+  <div class="brand">
+    <pre class="logo">  ___              __      _____ _____
+ / _ \ _ __  ___ _ \ \    / / _ \_   _|
+| (_) | '_ \/ -_) ' \ \/\/ /|   / | |
+ \___/| .__/\___|_||_\_/\_/ |_|_\ |_|</pre>
+    <div class="lang" role="group" aria-label="Language">
+      <button type="button" id="btn-en" class="active" onclick="setLang('en')">EN</button>
+      <button type="button" id="btn-zh" onclick="setLang('zh')">中文</button>
+    </div>
+  </div>
+
+  <p class="sub" data-i18n="desc">Remote OpenWrt admin over SSH or LuCI/ubus HTTP. Same services power the CLI tables, setup wizard, and full-screen TUI.</p>
+
+  <div class="tabs" role="tablist">
+    <button type="button" class="tab active" role="tab" aria-selected="true" onclick="switchTab(this,'unix')">Linux / macOS</button>
+    <button type="button" class="tab" role="tab" aria-selected="false" onclick="switchTab(this,'win')">Windows</button>
+  </div>
+
+  <div id="panel-unix" class="panel active">
+    <div class="label" data-i18n="label.unix">One-liner</div>
+    <div class="cmd" data-copy="curl -fsSL https://raw.githubusercontent.com/Necho-dev/openwrt-cli/main/install.sh | bash" onclick="copy(this)">
+      curl -fsSL https://raw.githubusercontent.com/Necho-dev/openwrt-cli/main/install.sh | bash
+      <span class="hint" data-i18n="copy">copy</span>
+    </div>
+  </div>
+
+  <div id="panel-win" class="panel">
+    <div class="label" data-i18n="label.win">PowerShell / cmd</div>
+    <div class="cmd" data-copy="pip install git+https://github.com/Necho-dev/openwrt-cli.git" onclick="copy(this)">
+      pip install git+https://github.com/Necho-dev/openwrt-cli.git
+      <span class="hint" data-i18n="copy">copy</span>
+    </div>
+    <p class="note" style="padding:10px 0 0;margin:0" data-i18n="win.alt">From a clone: run install.bat. Then: openwrt setup</p>
+  </div>
+
+  <div class="features">
+    <div class="feature"><b>TUI</b><span data-i18n="f.tui">Overview · Network · Neighbors · Services</span></div>
+    <div class="feature"><b>doctor</b><span data-i18n="f.doctor">SSH / HTTP health, JSON-ready</span></div>
+    <div class="feature"><b>network</b><span data-i18n="f.net">Interfaces · Routes · Rules · Neighbors</span></div>
+    <div class="feature"><b>setup</b><span data-i18n="f.setup">Language + connection wizard</span></div>
+    <div class="feature"><b>SSH / HTTP</b><span data-i18n="f.trans">LuCI ubus when SSH is off</span></div>
+    <div class="feature"><b>-f json</b><span data-i18n="f.json">Agent-friendly, no TTY needed</span></div>
+  </div>
+
+  <div class="next">
+    <div class="label" data-i18n="label.next">After install</div>
+    <div class="row">openwrt setup <span># language + connection</span></div>
+    <div class="row">openwrt doctor</div>
+    <div class="row">openwrt tui</div>
+    <div class="row">openwrt network neighbors</div>
+  </div>
+
+  <p class="note" style="padding-top:12px" data-i18n="cfg">Config lives in <code>~/.openwrt-cli.yaml</code>. Command names stay English; UI follows <code>-L zh</code> / <code>-L en</code> or the system locale. Python &gt;= 3.12.</p>
+
+  <div class="links">
+    <div>
+      <a href="https://github.com/Necho-dev/openwrt-cli" target="_blank" rel="noopener">GitHub</a>
+      &nbsp;·&nbsp;
+      <a href="https://github.com/Necho-dev/openwrt-cli/issues" target="_blank" rel="noopener" data-i18n="issues">Issues</a>
+    </div>
+    <a class="gh" href="https://github.com/Necho-dev/openwrt-cli" target="_blank" rel="noopener">
+      <svg height="16" width="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+      <span data-i18n="repo">Repository</span>
+    </a>
+  </div>
+</div>
+
+<script>
+const I18N = {
+  en: {
+    desc: "Remote OpenWrt admin over SSH or LuCI/ubus HTTP. Same services power the CLI tables, setup wizard, and full-screen TUI.",
+    "label.unix": "One-liner",
+    "label.win": "PowerShell / cmd",
+    "label.next": "After install",
+    copy: "copy",
+    copied: "copied",
+    "win.alt": "From a clone: run install.bat. Then: openwrt setup",
+    "f.tui": "Overview · Network · Neighbors · Services",
+    "f.doctor": "SSH / HTTP health, JSON-ready",
+    "f.net": "Interfaces · Routes · Rules · Neighbors",
+    "f.setup": "Language + connection wizard",
+    "f.trans": "LuCI ubus when SSH is off",
+    "f.json": "Agent-friendly, no TTY needed",
+    cfg: "Config lives in ~/.openwrt-cli.yaml. Command names stay English; UI follows -L zh / -L en or the system locale. Python >= 3.12.",
+    issues: "Issues",
+    repo: "Repository",
+  },
+  zh: {
+    desc: "通过 SSH 或 LuCI/ubus HTTP 远程管理 OpenWrt。命令行表格、setup 向导和全屏 TUI 共用同一套 Service。",
+    "label.unix": "一键安装",
+    "label.win": "PowerShell / cmd",
+    "label.next": "安装之后",
+    copy: "复制",
+    copied: "已复制",
+    "win.alt": "克隆仓库后运行 install.bat，然后：openwrt setup",
+    "f.tui": "Overview · Network · Neighbors · Services",
+    "f.doctor": "SSH / HTTP 体检，可出 JSON",
+    "f.net": "Interfaces · Routes · Rules · Neighbors",
+    "f.setup": "语言 + 连接向导",
+    "f.trans": "无 SSH 时走 LuCI ubus",
+    "f.json": "面向 Agent，不依赖 TTY",
+    cfg: "配置写在 ~/.openwrt-cli.yaml。命令名保持英文；界面跟 -L zh / -L en 或系统语言。需要 Python >= 3.12。",
+    issues: "问题反馈",
+    repo: "仓库",
+  },
+};
+
+let lang = "en";
+
+function applyLang() {
+  const pack = I18N[lang];
+  document.documentElement.lang = lang === "zh" ? "zh-CN" : "en";
+  document.querySelectorAll("[data-i18n]").forEach((el) => {
+    const key = el.getAttribute("data-i18n");
+    if (pack[key]) el.textContent = pack[key];
+  });
+  document.querySelectorAll(".cmd .hint").forEach((h) => {
+    if (!h.parentElement.classList.contains("copied")) h.textContent = pack.copy;
+  });
+  document.getElementById("btn-en").classList.toggle("active", lang === "en");
+  document.getElementById("btn-zh").classList.toggle("active", lang === "zh");
+}
+
+function setLang(next) {
+  lang = next;
+  applyLang();
+}
+
+function switchTab(el, id) {
+  document.querySelectorAll(".tab").forEach((t) => {
+    t.classList.remove("active");
+    t.setAttribute("aria-selected", "false");
+  });
+  el.classList.add("active");
+  el.setAttribute("aria-selected", "true");
+  document.querySelectorAll(".panel").forEach((p) => p.classList.remove("active"));
+  document.getElementById("panel-" + id).classList.add("active");
+}
+
+function copy(el) {
+  const text = el.getAttribute("data-copy") || "";
+  navigator.clipboard.writeText(text).then(() => {
+    el.classList.add("copied");
+    const hint = el.querySelector(".hint");
+    hint.textContent = I18N[lang].copied;
+    setTimeout(() => {
+      el.classList.remove("copied");
+      hint.textContent = I18N[lang].copy;
+    }, 1800);
+  });
+}
+
+(function init() {
+  const nav = (navigator.language || "en").toLowerCase();
+  lang = nav.startsWith("zh") ? "zh" : "en";
+  applyLang();
+})();
+</script>
+</body>
+</html>

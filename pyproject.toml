@@ -1,0 +1,56 @@
+[project]
+name = "openwrt-cli"
+version = "1.0.1"
+description = "OpenWrt CLI 管理工具"
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.12,<4"
+authors = [
+    { name = "openwrt-cli contributors" },
+]
+keywords = ["openwrt", "cli", "router", "ssh"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+dependencies = [
+    "paramiko>=3.0.0",
+    "pyyaml>=6.0",
+    "questionary>=2.0.0",
+    "typer>=0.15.0",
+    "rich>=13.0.0",
+    "textual>=1.0.0",
+    "pyfiglet>=1.0.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/Necho-dev/openwrt-cli"
+Repository = "https://github.com/Necho-dev/openwrt-cli"
+
+[project.scripts]
+openwrt = "openwrt_cli.app:main"
+openwrt-cli = "openwrt_cli.app:main"
+
+[tool.poetry]
+packages = [{ include = "openwrt_cli", from = "src" }]
+include = [
+    { path = "src/openwrt_cli/i18n/locales/*.json", format = ["sdist", "wheel"] },
+]
+
+[tool.poetry.group.dev.dependencies]
+pytest = ">=8.0"
+pytest-cov = ">=5.0"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+markers = [
+    "live: read-only CLI against a real OpenWrt (OPENWRT_LIVE=1)",
+]
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"

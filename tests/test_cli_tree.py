@@ -1,11 +1,18 @@
 from __future__ import annotations
 
+import re
+
 from typer.testing import CliRunner
 
 from openwrt_cli.app import app
 from openwrt_cli.version import package_version
 
 runner = CliRunner()
+
+
+def _plain(text: str) -> str:
+    """Rich help inserts ANSI between flag fragments at 80 columns."""
+    return re.sub(r"\x1b\[[0-9;]*[mK]", "", text or "")
 
 _GROUPS = (
     "network", "firewall", "qos", "service", "passwall2", "user", "backup",
@@ -65,21 +72,25 @@ def test_passwall2_help_is_readonly():
         assert name in node.stdout
     add = runner.invoke(app, ["passwall2", "node", "add", "--help"])
     assert add.exit_code == 0
+    add_help = _plain(add.stdout)
     for flag in ("--from-url", "--type", "--protocol", "--remarks", "--group", "--address", "--port", "--username", "--password"):
-        assert flag in add.stdout
+        assert flag in add_help
     patch = runner.invoke(app, ["passwall2", "node", "set", "--help"])
     assert patch.exit_code == 0
+    patch_help = _plain(patch.stdout)
     for flag in ("--remarks", "--group", "--type", "--address", "--username", "--unset"):
-        assert flag in patch.stdout
+        assert flag in patch_help
     logs = runner.invoke(app, ["passwall2", "logs", "--help"])
     assert logs.exit_code == 0
-    assert "--since" in logs.stdout
-    assert "--until" in logs.stdout
-    assert "--tail" in logs.stdout
+    logs_help = _plain(logs.stdout)
+    assert "--since" in logs_help
+    assert "--until" in logs_help
+    assert "--tail" in logs_help
     acl_log = runner.invoke(app, ["passwall2", "acl", "log", "--help"])
     assert acl_log.exit_code == 0
-    assert "--since" in acl_log.stdout
-    assert "--until" in acl_log.stdout
+    acl_log_help = _plain(acl_log.stdout)
+    assert "--since" in acl_log_help
+    assert "--until" in acl_log_help
     acl = runner.invoke(app, ["passwall2", "acl", "--help"])
     assert acl.exit_code == 0
     for name in ("add", "set", "delete", "source", "show", "log"):

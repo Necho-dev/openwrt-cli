@@ -17,8 +17,21 @@ _CANONICAL_KEYS = (
     "identity_file",
     "verify_ssl",
     "password",
+    "mcp",
 )
 _SKIP_KEYS = frozenset({"_config_path", "http_port"})
+
+MCP_MODES = frozenset({"readonly", "readwrite"})
+MCP_MODE_DEFAULT = "readonly"
+MASKED_SECRET = "********"
+
+
+class McpModeError(ValueError):
+    """mcp.mode is missing a legal value (readonly / readwrite)."""
+
+    def __init__(self, mode: str):
+        self.mode = mode
+        super().__init__(mode)
 
 
 def _as_int(value: Any, default: int) -> int:
@@ -86,7 +99,29 @@ def normalize_config(raw: Any) -> dict:
         cfg.pop("language", None)
     if not cfg.get("user"):
         cfg["user"] = "root"
+    cfg["mcp"] = _normalize_mcp(cfg.get("mcp"), original.get("mcp") if isinstance(raw, dict) else None)
     return cfg
+
+
+def _normalize_mcp(current: Any, original: Any) -> dict:
+    """Default missing mcp.mode to readonly; keep illegal values for the caller to reject."""
+    src = current if isinstance(current, dict) else (original if isinstance(original, dict) else {})
+    out = {str(k): v for k, v in src.items()}
+    mode = out.get("mode")
+    if mode is None or str(mode).strip() == "":
+        out["mode"] = MCP_MODE_DEFAULT
+        return out
+    out["mode"] = str(mode).strip().lower()
+    return out
+
+
+def mcp_mode(cfg: dict) -> str:
+    """Validated mcp.mode. Missing/empty → readonly. Illegal values raise McpModeError."""
+    block = cfg.get("mcp") if isinstance(cfg.get("mcp"), dict) else {}
+    mode = str(block.get("mode") or MCP_MODE_DEFAULT).strip().lower()
+    if mode not in MCP_MODES:
+        raise McpModeError(mode)
+    return mode
 
 
 def canonical_config(cfg: dict) -> dict:
@@ -99,6 +134,8 @@ def canonical_config(cfg: dict) -> dict:
             continue
         value = normalized.get(key)
         if value is None or value == "":
+            continue
+        if key == "mcp" and isinstance(value, dict) and not value:
             continue
         out[key] = value
     for key, value in normalized.items():
@@ -114,7 +151,7 @@ def public_config(cfg: dict, *, path: str | None = None) -> dict:
     """Effective config for display / JSON. Password is masked."""
     data = canonical_config(cfg)
     if data.get("password"):
-        data["password"] = "***"
+        data["password"] = MASKED_SECRET
     if path:
         return {"path": path, **data}
     return data
@@ -126,6 +163,7 @@ def _default_config() -> dict:
         "user": "root",
         "port": 22,
         "transport": "ssh",
+        "mcp": {"mode": MCP_MODE_DEFAULT},
     }
 
 

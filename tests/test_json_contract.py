@@ -8,6 +8,7 @@ from typer.main import get_command
 from typer.testing import CliRunner
 
 from openwrt_cli.app import app, hoist_global_options
+from openwrt_cli.core.config import MASKED_SECRET
 from openwrt_cli.version import package_version
 
 
@@ -118,7 +119,7 @@ def test_config_path_and_show_json(tmp_path: Path):
     body = _parse(shown.stdout)
     assert body["ok"] is True
     assert "path" in body
-    assert "password" not in json.dumps(body).replace("***", "")
+    assert "password" not in json.dumps(body).replace(MASKED_SECRET, "")
 
 
 def test_device_commands_json_need_host(tmp_path: Path):

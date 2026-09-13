@@ -75,6 +75,7 @@ jobs:
         id: preflight
         env:
           GITHUB_REF_NAME: ${{ github.ref_name }}
+          RELEASE_NOTES_FILE: release-notes.md
         run: python .github/scripts/release_preflight.py
 
       - name: Rewrite README asset URLs for PyPI

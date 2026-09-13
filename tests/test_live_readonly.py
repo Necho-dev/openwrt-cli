@@ -5,6 +5,8 @@ import os
 
 import pytest
 
+from openwrt_cli.core.config import MASKED_SECRET
+
 pytestmark = pytest.mark.live
 
 # Read-only CLI: no --yes mutations, no TUI, no setup/wizard prompts.
@@ -56,7 +58,7 @@ def test_readonly_json(args: list[str], keys: set[str], run_cli, parse_json, red
     missing = keys - set(data)
     assert not missing, (missing, sorted(data))
     blob = json.dumps(data)
-    assert "password" not in blob.lower() or "***" in blob
+    assert "password" not in blob.lower() or MASKED_SECRET in blob
     if "routes" in data:
         assert data["routes"], "expected kernel routes"
         sample = data["routes"][0]
@@ -88,7 +90,7 @@ def test_config_path_and_text_show(run_cli) -> None:
     assert shown.returncode == 0
     text = shown.stdout
     assert "443" in text or "80" in text or "22" in text
-    assert "***" in text or "密码" in text
+    assert MASKED_SECRET in text or "密码" in text
 
 
 def test_interfaces_use_role_device_labels(run_cli, redact) -> None:

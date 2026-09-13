@@ -11,6 +11,73 @@ A `vX.Y.Z` tag is published only when **both** this file and
 [CHANGELOG.zh.md](CHANGELOG.zh.md) have a matching `## [X.Y.Z]` section.
 The English section becomes the GitHub Release body, with a link to the Chinese notes.
 
+## [Unreleased]
+
+## [1.2.0] - 2026-09-13
+
+Feature release **1.2.0**. Agent surface: a packaged skill (`openwrt-ops`), a thin FastMCP server (`openwrt-mcp`), and local install commands. Humans still use `openwrt` / `openwrt tui`. Agents drive the same services through MCP tools. The JSON contract is unchanged (`ok` plus flattened fields). Passwords stay in `~/.openwrt-cli.yaml`; they are never copied into MCP client config.
+
+### Skill (`openwrt-ops`)
+
+Playbook + tool cheat-sheet, shipped in the wheel (`SKILL.md`, `USAGE.md`). Description is English-only so clients match on OpenWrt / LuCI / PassWall2 / outage wording.
+
+`openwrt skill` does not talk to the router:
+
+- `detect` (also the default with no subcommand) — which Agent clients are on this machine, and whether the skill is already installed globally. Columns: Id, Client, Detected, Installed, Via.
+- `list` — packaged files plus **user-level** install paths; current-project copies show as yes/no only (no project path).
+- `show` — print the packaged `SKILL.md`.
+- `install` — TTY wizard: one detected client (or a custom directory), then user-level vs this workspace, then a path check and confirm. `--global` / `--project` are exclusive; `--dir PATH` writes `PATH/openwrt-ops/` and skips scope. Non-interactive / `--yes` defaults to all detected clients, user-level.
+- `uninstall` — same targeting as install.
+
+Clients: Cursor, Claude Code, Codex, Trae, Windsurf, Qoder, OpenCode. Detection is home-directory marks and/or binaries on `PATH`. `--dir` is the escape hatch; `~/.cursor/skills-cursor/` is never written.
+
+```bash
+openwrt skill detect
+openwrt skill install
+openwrt skill install --agent cursor --yes
+openwrt skill install --dir ~/skills --yes
+```
+
+### MCP server
+
+Optional extra `openwrt-cli[mcp]`. Entry points: `openwrt-mcp` and `python -m openwrt_cli.mcp` (stdio). Tools wrap existing services on a shared `DeviceClient`. `openwrt skill` / `openwrt mcp` do not import the server, so they run without the extra.
+
+`openwrt mcp` only prints; it does not write client config files:
+
+- `json` — merge-safe `mcpServers.openwrt` (TOML for Codex, OpenCode’s own shape)
+- `prompt` — paste-ready Agent install text
+- `path` — recommended user / project config paths
+
+```json
+{ "mcpServers": { "openwrt": { "command": "openwrt-mcp" } } }
+```
+
+```bash
+openwrt mcp json --client cursor
+claude mcp add openwrt -- openwrt-mcp
+```
+
+Read tools include `doctor`, `system_status`, `network_*`, `firewall_view`, `qos_view`, `service_*`, `passwall2_*` (node list without Ping), `logs_read`, `config_show` (password masked). Write tools (`wifi_set`, `lan_set`, PassWall2 node/ACL, `service_action`, `backup_create`, `user_key_add`, …) carry `destructiveHint`. `passwall2_nodes` does not ping. `backup_create` writes under `/tmp` on the router (basename only).
+
+### Permissions
+
+`mcp.mode` in `~/.openwrt-cli.yaml` (also `openwrt config set --mcp-mode`). Default **readonly**: read tools work; write tools return `mcp_readonly` and do not touch the router. **readwrite** runs writes only after the user confirms in the client (or a clear yes in chat). `full` is rejected at config set and at MCP startup (exit 2). There is no `OPENWRT_MCP_MODE` env override.
+
+The guard applies to the MCP process only. Human CLI is unchanged. When MCP is connected, Agents must not mutate with `openwrt … --yes` (that skips `mcp.mode`).
+
+Never registered as MCP tools: reboot, shutdown, backup restore, user add / passwd / delete. Those stay human CLI (`openwrt system reboot --yes`).
+
+### Install, setup, docs
+
+- `install.sh` / `install.bat` install `openwrt-cli[mcp]`, list skill / MCP next steps, and can run `openwrt setup` then `openwrt skill install`.
+- `openwrt setup` still only configures language and the router. After a successful probe it shows `mcp.mode` and next commands: `doctor`, `skill install`, `mcp json`, `tui`.
+- README **Drop it into your AI agent** / **给 Agent 使用**: three-step wiring, client snippets, what tools exist, and a paste-ready Agent prompt (`openwrt mcp prompt` is the client-specific variant).
+
+### Changed
+
+- `config show` masks passwords as `********` (was `***`, which some terminals treat as markup).
+- Skill install wizard is a single-select like `openwrt setup` (highlight = the one client that will be installed). Multi-client install stays `--agent` / `--yes`.
+
 ## [1.1.1] - 2026-09-13
 
 Patch for PassWall2 TUI writes: restart could succeed while UCI stayed unchanged, and confirm text could hide the service name.

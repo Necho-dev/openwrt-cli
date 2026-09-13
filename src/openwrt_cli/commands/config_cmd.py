@@ -3,7 +3,7 @@ from __future__ import annotations
 import typer
 
 from openwrt_cli.commands.common import FormatOpt, YesOpt, apply_opts, get_app
-from openwrt_cli.core.config import ConfigManager, public_config
+from openwrt_cli.core.config import MCP_MODES, ConfigManager, public_config
 from openwrt_cli.i18n import _, normalize_language, set_language, t
 from openwrt_cli.services.result import CommandResult
 from openwrt_cli.ui.render import emit
@@ -43,6 +43,7 @@ def config_set(
     http: bool = typer.Option(False, "--http"),
     https: bool = typer.Option(False, "--https"),
     language: str | None = typer.Option(None, "-L", "--language", help=_("help.opt.language")),
+    mcp_mode_opt: str | None = typer.Option(None, "--mcp-mode", help=_("help.opt.mcp_mode")),
     format: FormatOpt = None,
     yes: YesOpt = False,
 ):
@@ -59,6 +60,13 @@ def config_set(
             raise typer.BadParameter(t("err.language"))
         app.cfg["language"] = resolved
         set_language(resolved)
+    if mcp_mode_opt is not None:
+        mode = mcp_mode_opt.strip().lower()
+        if mode not in MCP_MODES:
+            raise typer.BadParameter(t("err.mcp_mode", mode=mcp_mode_opt))
+        block = dict(app.cfg.get("mcp") or {})
+        block["mode"] = mode
+        app.cfg["mcp"] = block
     try:
         _apply_connect_flags(app.cfg, ssh=ssh, http=http, https=https, port=port)
     except typer.BadParameter as e:

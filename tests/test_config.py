@@ -1,7 +1,12 @@
 from __future__ import annotations
 
+import pytest
+
 from openwrt_cli.core.config import (
+    MASKED_SECRET,
+    McpModeError,
     canonical_config,
+    mcp_mode,
     normalize_config,
     public_config,
     resolve_http_port,
@@ -41,7 +46,7 @@ def test_canonical_order_and_mask():
     assert "_config_path" not in saved
     assert "http_port" not in saved
     pub = public_config(raw, path="/tmp/x.yaml")
-    assert pub["password"] == "***"
+    assert pub["password"] == MASKED_SECRET
     assert pub["path"] == "/tmp/x.yaml"
 
 
@@ -55,3 +60,23 @@ def test_https_transport_alias_and_ssh_defaults():
     assert ssh["port"] == 22
     assert ssh["user"] == "root"
     assert "scheme" not in ssh
+
+
+def test_old_yaml_defaults_mcp_readonly():
+    cfg = normalize_config({"host": "192.0.2.1"})
+    assert cfg["mcp"]["mode"] == "readonly"
+    assert mcp_mode(cfg) == "readonly"
+    saved = canonical_config(cfg)
+    assert saved["mcp"] == {"mode": "readonly"}
+    pub = public_config({"host": "192.0.2.1", "password": "secret"})
+    assert pub["mcp"]["mode"] == "readonly"
+    assert pub["password"] == MASKED_SECRET
+
+
+def test_mcp_mode_readwrite_and_invalid():
+    assert mcp_mode(normalize_config({"mcp": {"mode": "readwrite"}})) == "readwrite"
+    bad = normalize_config({"mcp": {"mode": "full"}})
+    assert bad["mcp"]["mode"] == "full"
+    with pytest.raises(McpModeError) as exc:
+        mcp_mode(bad)
+    assert exc.value.mode == "full"

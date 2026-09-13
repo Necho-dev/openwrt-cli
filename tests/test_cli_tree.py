@@ -16,7 +16,7 @@ def _plain(text: str) -> str:
 
 _GROUPS = (
     "network", "firewall", "qos", "service", "passwall2", "user", "backup",
-    "system", "config", "doctor",
+    "system", "config", "doctor", "skill", "mcp",
 )
 _TOP = ("setup", "tui", "wizard", "logs")
 _GONE = ("interactive", "monitor", "conf")

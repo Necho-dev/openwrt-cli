@@ -65,6 +65,7 @@
 - **PassWall2** — 可选 `luci-app-passwall2`；**需要 openwrt-cli &gt;= 1.1.0**。读状态 / 节点 / ACL / 日志；可增删改节点与 ACL；探测到插件时出现 TUI 第 `7` 页
 - **同一套设备模型** — SSH 与 HTTP 共用 ubus / uci / shell 语义；缺能力就明确失败（不造假数据）
 - **Agent-ready** — `-f json` / `-f compact`，不依赖 TTY 或颜色
+- **MCP / Skills** — 见 [给 Agent 使用](#给-agent-使用)，可接到 Cursor、Claude Code、Codex。默认 `mcp.mode` 为 **readonly**
 - **中英界面** — 命令名始终是英文
 
 ## 快速开始
@@ -75,6 +76,8 @@ openwrt setup
 openwrt doctor
 openwrt tui
 ```
+
+想在 Cursor、Claude Code 里让助手查路由器、改配置？见 [给 Agent 使用](#给-agent-使用)。
 
 非交互等价写法：
 
@@ -99,13 +102,13 @@ curl -fsSL https://raw.githubusercontent.com/Necho-dev/openwrt-cli/main/install.
 **Windows** — clone 后运行 `install.bat`，或：
 
 ```cmd
-pip install git+https://github.com/Necho-dev/openwrt-cli.git
+pip install "openwrt-cli[mcp] @ git+https://github.com/Necho-dev/openwrt-cli.git"
 ```
 
 **pip / pipx**
 
 ```bash
-pipx install git+https://github.com/Necho-dev/openwrt-cli.git
+pipx install "openwrt-cli[mcp] @ git+https://github.com/Necho-dev/openwrt-cli.git"
 ```
 
 **开发安装（Poetry）**
@@ -253,7 +256,127 @@ openwrt config show
 openwrt config path
 openwrt config set -H 192.168.1.1 --ssh
 openwrt config set --language zh
+openwrt config set --mcp-mode readonly     # 默认
+openwrt config set --mcp-mode readwrite    # 允许 MCP 写入（须用户确认）
 ```
+
+## 给 Agent 使用
+
+人用 CLI / TUI。助手靠两样东西干活：**Skill**（`openwrt-ops`，操作说明）和 **MCP**（`openwrt-mcp`，真正调路由器的工具）。配好之后，可以直接问「路由器还好吗」「谁在局域网」「PassWall2 什么状态」；改配置必须你点头。密码只存在本机 yaml 里，不用贴进对话。
+
+可以自己按下面三步配，也可以把本节末尾的英文说明贴给助手，让它带着做。
+
+### 1. 先连上路由器
+
+```bash
+openwrt setup
+openwrt doctor
+```
+
+写入 `~/.openwrt-cli.yaml`。MCP 服务会读这份文件，**不要把 `password`、`identity_file` 写进 MCP 配置。**
+
+### 2. 安装 Skill
+
+```bash
+openwrt skill install            # 交互：选已探测到的客户端
+openwrt skill install --yes      # 装到所有已探测客户端（用户级）
+```
+
+会把 `openwrt-ops` 拷进对应目录（Cursor 是 `~/.cursor/skills`，Claude Code 是 `~/.claude/skills` 等）。`install.sh` / `install.bat` 里也可以选这一步。
+
+### 3. 加上 MCP 条目（不要删掉已有服务）
+
+```bash
+pip install 'openwrt-cli[mcp]'   # 若已用 install.sh 安装，可跳过
+openwrt mcp json                 # 通用片段
+openwrt mcp json --client cursor
+openwrt mcp path                 # 各客户端配置文件路径
+```
+
+**Cursor**（`~/.cursor/mcp.json`），Trae / Windsurf / Qoder 也是同一份 JSON：
+
+```json
+{
+  "mcpServers": {
+    "openwrt": {
+      "command": "openwrt-mcp"
+    }
+  }
+}
+```
+
+**Claude Code**
+
+```bash
+claude mcp add openwrt -- openwrt-mcp
+```
+
+**Codex**：`openwrt mcp json --client codex` 会生成写入 `~/.codex/config.toml` 的 TOML。
+
+保存后在客户端重载 MCP。条目名必须是 `openwrt`。如果 PATH 里没有 `openwrt-mcp`，改用 `python -m openwrt_cli.mcp`（`openwrt mcp json` 会按环境选启动命令）。
+
+### 助手能调哪些工具
+
+| | 工具 |
+|---|---|
+| **先探活** | `doctor` · `config_show`（密码已打码） |
+| **只读** | `system_status` · `network_overview` · `network_neighbors` · `network_leases` · `firewall_view` · `service_list` · `passwall2_status` · `passwall2_nodes`（不 Ping）· `passwall2_logs` · `logs_read` |
+| **写入** | 仅当 `mcp.mode=readwrite`，并且你在对话里明确同意（如 `wifi_set`、`lan_set`、PassWall2 节点/ACL、`service_action`） |
+| **不要走 MCP** | 重启、关机、恢复备份、用户增删改密 — 请在自己的终端执行（例如 `openwrt system reboot --yes`） |
+
+`mcp.mode` 默认是 **readonly**。未改之前，写入工具会返回 `mcp_readonly`：
+
+```bash
+openwrt config set --mcp-mode readwrite
+```
+
+MCP 已经连上时，**不要**再用 `openwrt … --yes` 改路由器，那会绕过 `mcp.mode`。
+
+### 给助手的安装说明
+
+把下面这段英文贴进 Cursor、Claude Code 或 Codex，让它按步骤配完：
+
+```
+You're setting up openwrt-cli so I can operate an OpenWrt router from this chat.
+
+WHAT IT IS
+  Command: openwrt. Humans use CLI/TUI. You use MCP tools (openwrt-mcp) plus the
+  openwrt-ops skill. Transport is SSH or LuCI/ubus HTTP.
+  Config lives in ~/.openwrt-cli.yaml — the MCP server reads it. Never copy
+  password or identity_file into MCP JSON, chat, or tool output.
+
+INSTALL
+  pip install 'openwrt-cli[mcp]'          # or: the repo install.sh / install.bat
+  openwrt setup                           # language + host + SSH/HTTP
+  openwrt doctor                          # first hop
+  openwrt skill install                   # copies openwrt-ops into this Agent
+  openwrt mcp json                        # MERGE mcpServers.openwrt; keep other servers
+
+CONNECT MCP
+  Cursor:      ~/.cursor/mcp.json  →  { "mcpServers": { "openwrt": { "command": "openwrt-mcp" } } }
+  Claude Code: claude mcp add openwrt -- openwrt-mcp
+  Codex:       openwrt mcp json --client codex   (TOML → ~/.codex/config.toml)
+  If openwrt-mcp is missing: python -m openwrt_cli.mcp
+  Reload MCP after saving.
+
+GOLDEN PATH
+  doctor → read-only inspect (system / network / passwall2)
+        → preview any write → user runs: openwrt config set --mcp-mode readwrite
+        → call a write tool only after a clear yes in chat
+        → apply / restart is a second write (confirm again)
+
+RULES
+  1) Prefer MCP tools when the openwrt server is connected.
+     Read-only CLI fallback: openwrt -f json doctor|system status|network leases
+  2) mcp.mode defaults to readonly. Writes return mcp_readonly until readwrite.
+  3) When MCP is available, do not mutate with openwrt … --yes (bypasses the guard).
+  4) Never invent reboot, shutdown, backup restore, or user add/passwd/delete as MCP tools.
+
+Now: run doctor, then a read-only look at neighbors and PassWall2 status.
+Full skill: packaged as openwrt-ops (openwrt skill show).
+```
+
+需要按客户端生成说明时，用 `openwrt mcp prompt`。
 
 界面语言（表头、TUI、setup、帮助）按下面顺序解析：
 
@@ -270,6 +393,7 @@ src/openwrt_cli/
   app.py          # 入口（openwrt / openwrt-cli）
   commands/       # Typer
   services/       # 与呈现无关的业务
+  mcp/            # Skill 包、MCP 引导、FastMCP 服务
   tui/            # textual 仪表盘
   ui/             # Rich / questionary
   core/           # DeviceClient、SSH / HTTP 通道

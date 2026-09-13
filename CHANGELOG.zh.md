@@ -7,6 +7,73 @@
 打 `vX.Y.Z` 标签前，**本文件与** [CHANGELOG.md](CHANGELOG.md) **必须有同一节** `## [X.Y.Z]`。
 GitHub Release 正文使用英文，并附上本节的链接。
 
+## [Unreleased]
+
+## [1.2.0] - 2026-09-13
+
+功能版本 **1.2.0**。给 Agent 用的一层：包内技能 `openwrt-ops`、薄 FastMCP 服务 `openwrt-mcp`、以及本机分发命令。人继续用 `openwrt` / `openwrt tui`。助手走同一套 Service。JSON 契约不变（`ok` + 摊平字段）。密码只放在 `~/.openwrt-cli.yaml`，不会写进各客户端的 MCP 配置。
+
+### Skill（`openwrt-ops`）
+
+操作说明 + 工具速查，打进 wheel（`SKILL.md`、`USAGE.md`）。YAML description 只用英文，方便客户端按 OpenWrt / LuCI / PassWall2 / 断网等词触发。
+
+`openwrt skill` 不连路由器：
+
+- `detect`（无子命令时也是它）— 本机有哪些 Agent，以及用户级是否已装。列：Id、Client、Detected、Installed、Via。
+- `list` — 包内文件和**用户级**安装路径；当前项目只显示有/无，不打印项目路径。
+- `show` — 打印包内 `SKILL.md`。
+- `install` — TTY 向导：选一个已探测客户端（或自定义目录），再选用户级 / 当前工作区，检查路径后确认。`--global` 与 `--project` 互斥；`--dir PATH` 写入 `PATH/openwrt-ops/`，不走 scope。非交互 / `--yes` 默认装到所有已探测客户端的用户级目录。
+- `uninstall` — 目标规则与 install 相同。
+
+客户端：Cursor、Claude Code、Codex、Trae、Windsurf、Qoder、OpenCode。探测依据是家目录标记和/或 PATH 上的可执行文件。`--dir` 是逃生口；不会写入 `~/.cursor/skills-cursor/`。
+
+```bash
+openwrt skill detect
+openwrt skill install
+openwrt skill install --agent cursor --yes
+openwrt skill install --dir ~/skills --yes
+```
+
+### MCP 服务
+
+可选 extra `openwrt-cli[mcp]`。入口：`openwrt-mcp` 与 `python -m openwrt_cli.mcp`（stdio）。工具薄封装现有 Service，共用一个 `DeviceClient`。`openwrt skill` / `openwrt mcp` 不 import 服务端，没装 extra 也能跑。
+
+`openwrt mcp` 只打印，不改客户端配置文件：
+
+- `json` — 可合并的 `mcpServers.openwrt`（Codex 为 TOML，OpenCode 用自己的格式）
+- `prompt` — 给助手的安装说明
+- `path` — 各客户端推荐的用户级 / 项目级路径
+
+```json
+{ "mcpServers": { "openwrt": { "command": "openwrt-mcp" } } }
+```
+
+```bash
+openwrt mcp json --client cursor
+claude mcp add openwrt -- openwrt-mcp
+```
+
+只读工具包括 `doctor`、`system_status`、`network_*`、`firewall_view`、`qos_view`、`service_*`、`passwall2_*`（节点列表不 Ping）、`logs_read`、`config_show`（密码已打码）。写入工具（`wifi_set`、`lan_set`、PassWall2 节点/ACL、`service_action`、`backup_create`、`user_key_add` 等）带 `destructiveHint`。`backup_create` 只写路由器 `/tmp`（仅文件名）。
+
+### 权限
+
+`~/.openwrt-cli.yaml` 的 `mcp.mode`（也可用 `openwrt config set --mcp-mode`）。默认 **readonly**：只读可用，写入返回 `mcp_readonly`，不动路由器。**readwrite** 须用户在客户端确认（或对话里明确同意）后才执行写入。`full` 在 `config set` 和 MCP 启动时都会拒绝（退出码 2）。没有 `OPENWRT_MCP_MODE` 环境变量覆盖。
+
+门闩只拦 MCP 进程，人类 CLI 不改。MCP 已接通时，助手不要用 `openwrt … --yes` 改路由器（会绕过 `mcp.mode`）。
+
+永不注册为 MCP 工具：重启、关机、恢复备份、用户增删改密。这些仍走人类 CLI（`openwrt system reboot --yes`）。
+
+### 安装、向导、文档
+
+- `install.sh` / `install.bat` 会装 `openwrt-cli[mcp]`，下一步列出 skill / MCP，并可接着跑 `openwrt setup` 和 `openwrt skill install`。
+- `openwrt setup` 仍然只配语言和路由器。探测成功后展示 `mcp.mode`，下一步为 `doctor`、`skill install`、`mcp json`、`tui`。
+- README **给 Agent 使用** / **Drop it into your AI agent**：三步接入、各客户端片段、工具范围，以及可粘贴的安装说明（`openwrt mcp prompt` 是按客户端生成的版本）。
+
+### 变更
+
+- `config show` 密码打码改为 `********`（原先 `***` 容易被终端当成格式标记）。
+- Skill 安装向导改为与 `openwrt setup` 一样的单选（高亮即要安装的客户端）。一次装多个仍用 `--agent` / `--yes`。
+
 ## [1.1.1] - 2026-09-13
 
 PassWall2 TUI 写入修订：重启成功但 UCI 未变，以及确认框吃掉服务名。

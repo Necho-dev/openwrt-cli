@@ -65,6 +65,7 @@ The command is **`openwrt`**. `openwrt-cli` is still installed as a compatibilit
 - **PassWall2** — optional `luci-app-passwall2`; **requires openwrt-cli &gt;= 1.1.0**. Read status / nodes / ACL / logs; add, edit, delete nodes and ACL; TUI tab `7` when the package is present
 - **One device model** — SSH and HTTP share ubus / uci / shell semantics; missing capability fails loudly (no fake data)
 - **Agent-ready** — `-f json` / `-f compact`, no TTY or color required
+- **MCP / Skills** — wire Cursor / Claude Code / Codex in [Drop it into your AI agent](#drop-it-into-your-ai-agent). Default `mcp.mode` is **readonly**
 - **English / 简体中文 UI** — command names stay English
 
 ## Quick Start
@@ -75,6 +76,8 @@ openwrt setup
 openwrt doctor
 openwrt tui
 ```
+
+Using this from Cursor, Claude Code, or another Agent? Jump to [Drop it into your AI agent](#drop-it-into-your-ai-agent).
 
 Non-interactive equivalent:
 
@@ -99,13 +102,13 @@ curl -fsSL https://raw.githubusercontent.com/Necho-dev/openwrt-cli/main/install.
 **Windows** — clone, then run `install.bat`, or:
 
 ```cmd
-pip install git+https://github.com/Necho-dev/openwrt-cli.git
+pip install "openwrt-cli[mcp] @ git+https://github.com/Necho-dev/openwrt-cli.git"
 ```
 
 **pip / pipx**
 
 ```bash
-pipx install git+https://github.com/Necho-dev/openwrt-cli.git
+pipx install "openwrt-cli[mcp] @ git+https://github.com/Necho-dev/openwrt-cli.git"
 ```
 
 **Development (Poetry)**
@@ -253,7 +256,130 @@ openwrt config show
 openwrt config path
 openwrt config set -H 192.168.1.1 --ssh
 openwrt config set --language en
+openwrt config set --mcp-mode readonly    # default
+openwrt config set --mcp-mode readwrite   # MCP write tools (user must confirm)
 ```
+
+## Drop it into your AI agent
+
+The CLI is for you. The **skill** (`openwrt-ops`) is the playbook; **MCP** (`openwrt-mcp`) is the tool server. Together they let an Agent run doctor, inspect the LAN / PassWall2, and (only after you allow it) apply a change — without pasting passwords into chat.
+
+Two ways in:
+
+1. **You wire it** (below). Then ask in plain language: *is the router OK? who is on the LAN? PassWall2 status?*
+2. **Copy for agent** — paste the block at the end of this section into Cursor / Claude Code / Codex and let it walk the same steps.
+
+### 1. Connect the router once
+
+```bash
+openwrt setup
+openwrt doctor
+```
+
+This writes `~/.openwrt-cli.yaml`. The MCP server reads that file. **Never copy `password` or `identity_file` into MCP JSON.**
+
+### 2. Install the skill
+
+```bash
+openwrt skill install            # interactive: pick a detected client
+openwrt skill install --yes      # all detected clients, user-level
+```
+
+That copies `openwrt-ops` into the Agent skill directory (Cursor `~/.cursor/skills`, Claude Code `~/.claude/skills`, …). `install.sh` / `install.bat` can run this step for you.
+
+### 3. Merge MCP (keep other servers)
+
+```bash
+pip install 'openwrt-cli[mcp]'   # skip if install.sh already did this
+openwrt mcp json                 # generic mcpServers.openwrt
+openwrt mcp json --client cursor
+openwrt mcp path                 # recommended file per client
+```
+
+**Cursor** (`~/.cursor/mcp.json`) · **Trae / Windsurf / Qoder** (same JSON shape):
+
+```json
+{
+  "mcpServers": {
+    "openwrt": {
+      "command": "openwrt-mcp"
+    }
+  }
+}
+```
+
+**Claude Code**
+
+```bash
+claude mcp add openwrt -- openwrt-mcp
+```
+
+**Codex** — `openwrt mcp json --client codex` prints TOML for `~/.codex/config.toml`.
+
+Reload MCP in the client. The server key must stay `openwrt`. If `openwrt-mcp` is not on `PATH`, use `python -m openwrt_cli.mcp` instead (`openwrt mcp json` already picks the right launch).
+
+### What the agent can do
+
+| | Tools |
+|---|---|
+| **First hop** | `doctor` · `config_show` (password masked) |
+| **Read** | `system_status` · `network_overview` · `network_neighbors` · `network_leases` · `firewall_view` · `service_list` · `passwall2_status` · `passwall2_nodes` (no Ping) · `passwall2_logs` · `logs_read` |
+| **Write** | only when `mcp.mode=readwrite` **and** you confirm in chat (`wifi_set`, `lan_set`, PassWall2 node/ACL, `service_action`, …) |
+| **Never MCP** | reboot · shutdown · backup restore · user add / passwd / delete — human CLI only (`openwrt system reboot --yes`) |
+
+Default `mcp.mode` is **readonly**. Writes return `mcp_readonly` until:
+
+```bash
+openwrt config set --mcp-mode readwrite
+```
+
+When MCP is connected, **do not** mutate the router with `openwrt … --yes` — that skips `mcp.mode`.
+
+### Copy for agent
+
+Paste this into Cursor, Claude Code, Codex, or any Agent and ask it to finish setup:
+
+```
+You're setting up openwrt-cli so I can operate an OpenWrt router from this chat.
+
+WHAT IT IS
+  Command: openwrt. Humans use CLI/TUI. You use MCP tools (openwrt-mcp) plus the
+  openwrt-ops skill. Transport is SSH or LuCI/ubus HTTP.
+  Config lives in ~/.openwrt-cli.yaml — the MCP server reads it. Never copy
+  password or identity_file into MCP JSON, chat, or tool output.
+
+INSTALL
+  pip install 'openwrt-cli[mcp]'          # or: the repo install.sh / install.bat
+  openwrt setup                           # language + host + SSH/HTTP
+  openwrt doctor                          # first hop
+  openwrt skill install                   # copies openwrt-ops into this Agent
+  openwrt mcp json                        # MERGE mcpServers.openwrt; keep other servers
+
+CONNECT MCP
+  Cursor:      ~/.cursor/mcp.json  →  { "mcpServers": { "openwrt": { "command": "openwrt-mcp" } } }
+  Claude Code: claude mcp add openwrt -- openwrt-mcp
+  Codex:       openwrt mcp json --client codex   (TOML → ~/.codex/config.toml)
+  If openwrt-mcp is missing: python -m openwrt_cli.mcp
+  Reload MCP after saving.
+
+GOLDEN PATH
+  doctor → read-only inspect (system / network / passwall2)
+        → preview any write → user runs: openwrt config set --mcp-mode readwrite
+        → call a write tool only after a clear yes in chat
+        → apply / restart is a second write (confirm again)
+
+RULES
+  1) Prefer MCP tools when the openwrt server is connected.
+     Read-only CLI fallback: openwrt -f json doctor|system status|network leases
+  2) mcp.mode defaults to readonly. Writes return mcp_readonly until readwrite.
+  3) When MCP is available, do not mutate with openwrt … --yes (bypasses the guard).
+  4) Never invent reboot, shutdown, backup restore, or user add/passwd/delete as MCP tools.
+
+Now: run doctor, then a read-only look at neighbors and PassWall2 status.
+Full skill: packaged as openwrt-ops (openwrt skill show).
+```
+
+`openwrt mcp prompt` prints a client-specific variant of the same instructions.
 
 UI language (tables, TUI, setup, help) resolves as:
 
@@ -270,6 +396,7 @@ src/openwrt_cli/
   app.py          # entry (openwrt / openwrt-cli)
   commands/       # Typer
   services/       # presentation-free business logic
+  mcp/            # Skill pack, MCP guide, FastMCP server
   tui/            # textual dashboard
   ui/             # Rich / questionary
   core/           # DeviceClient, SSH / HTTP channels

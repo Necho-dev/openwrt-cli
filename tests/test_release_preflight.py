@@ -73,6 +73,23 @@ def test_en_zh_version_mismatch_is_rejected(tmp_path, monkeypatch):
         mod.require_changelog_alignment("1.0.1")
 
 
+def test_release_notes_not_written_without_env(tmp_path, monkeypatch):
+    mod = _load()
+    monkeypatch.delenv("RELEASE_NOTES_FILE", raising=False)
+    monkeypatch.setattr(mod, "ROOT", tmp_path)
+    assert mod.write_release_notes("hello\n") is None
+    assert not (tmp_path / "release-notes.md").exists()
+
+
+def test_release_notes_written_when_env_set(tmp_path, monkeypatch):
+    mod = _load()
+    monkeypatch.setattr(mod, "ROOT", tmp_path)
+    monkeypatch.setenv("RELEASE_NOTES_FILE", "release-notes.md")
+    written = mod.write_release_notes("hello\n")
+    assert written == tmp_path / "release-notes.md"
+    assert written.read_text(encoding="utf-8") == "hello\n"
+
+
 def test_zh_notes_required_for_alignment(tmp_path, monkeypatch):
     mod = _load()
     en = tmp_path / "CHANGELOG.md"

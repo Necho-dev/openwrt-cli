@@ -17,7 +17,9 @@ from openwrt_cli.commands.config_cmd import config_app
 from openwrt_cli.commands.doctor import doctor_app
 from openwrt_cli.commands.firewall import firewall_app
 from openwrt_cli.commands.logs import register_logs
+from openwrt_cli.commands.mcp_cmd import mcp_app
 from openwrt_cli.commands.network import network_app
+from openwrt_cli.commands.skill_cmd import skill_app
 from openwrt_cli.commands.passwall2 import pw2_app
 from openwrt_cli.commands.qos import qos_app
 from openwrt_cli.commands.service import service_app
@@ -35,7 +37,7 @@ from openwrt_cli.commands.wizard_cmd import (
 )
 from openwrt_cli.commands.common import fail, get_app, refuse_interactive
 from openwrt_cli.context import AppContext
-from openwrt_cli.core.config import ConfigManager
+from openwrt_cli.core.config import MASKED_SECRET, ConfigManager
 from openwrt_cli.services.result import CommandResult
 from openwrt_cli.ui.console import get_console
 from openwrt_cli.ui.render import emit
@@ -201,6 +203,8 @@ app.add_typer(backup_app, name="backup", help=_("help.backup"))
 app.add_typer(system_app, name="system", help=_("help.system"))
 app.add_typer(config_app, name="config", help=_("help.config"))
 app.add_typer(doctor_app, name="doctor", help=_("help.doctor"))
+app.add_typer(skill_app, name="skill", help=_("help.skill"))
+app.add_typer(mcp_app, name="mcp", help=_("help.mcp"))
 register_logs(app)
 
 
@@ -267,7 +271,7 @@ def root(
         import json
         safe = {k: v for k, v in cfg.items() if k != "_config_path"}
         if safe.get("password"):
-            safe["password"] = "***"
+            safe["password"] = MASKED_SECRET
         obj.console.print_json(data=safe)
         raise typer.Exit(0)
     if save_config:

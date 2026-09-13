@@ -1,6 +1,6 @@
 [project]
 name = "openwrt-cli"
-version = "1.1.1"
+version = "1.2.0"
 description = "OpenWrt CLI&TUI for AI Agent."
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -30,19 +30,25 @@ dependencies = [
 Homepage = "https://github.com/Necho-dev/openwrt-cli"
 Repository = "https://github.com/Necho-dev/openwrt-cli"
 
+[project.optional-dependencies]
+mcp = ["mcp>=1.9.0"]
+
 [project.scripts]
 openwrt = "openwrt_cli.app:main"
 openwrt-cli = "openwrt_cli.app:main"
+openwrt-mcp = "openwrt_cli.mcp.server:main"
 
 [tool.poetry]
 packages = [{ include = "openwrt_cli", from = "src" }]
 include = [
     { path = "src/openwrt_cli/i18n/locales/*.json", format = ["sdist", "wheel"] },
+    { path = "src/openwrt_cli/mcp/skills/**/*", format = ["sdist", "wheel"] },
 ]
 
 [tool.poetry.group.dev.dependencies]
 pytest = ">=8.0"
 pytest-cov = ">=5.0"
+mcp = ">=1.9.0"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

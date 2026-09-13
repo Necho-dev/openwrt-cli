@@ -144,6 +144,24 @@ def _render_text(console: Console, result: CommandResult) -> None:
     data = result.data
     kind = result.kind or (next(iter(data)) if isinstance(data, dict) and data else None)
 
+    if kind == "skill_detect" and isinstance(data, dict):
+        _render_skill_detect(console, data)
+        return
+    if kind == "skill_list" and isinstance(data, dict):
+        _render_skill_list(console, data)
+        return
+    if kind == "skill_plan" and isinstance(data, dict):
+        _render_skill_plan(console, data)
+        return
+    if kind == "skill" and isinstance(data, dict):
+        _render_skill(console, data)
+        return
+    if kind == "mcp_path" and isinstance(data, dict):
+        _render_mcp_path(console, data)
+        return
+    if kind == "mcp_guide" and isinstance(data, dict):
+        _render_mcp_guide(console, data)
+        return
     if kind == "config" and isinstance(data, dict):
         _render_config(console, data)
         return
@@ -592,6 +610,141 @@ def _ts_label(ts) -> str:
         return "—"
 
 
+def _yn(value: bool) -> str:
+    return t("label.yes") if value else t("label.no")
+
+
+def _via_label(via: list[str] | None) -> str:
+    parts = []
+    for item in via or []:
+        if item == "home":
+            parts.append(t("skill.via.home"))
+        elif item == "bin":
+            parts.append(t("skill.via.bin"))
+        elif item:
+            parts.append(str(item))
+    return "+".join(parts) if parts else "—"
+
+
+def _render_skill_detect(console: Console, data: dict[str, Any]) -> None:
+    rows = []
+    for item in data.get("clients") or []:
+        if not isinstance(item, dict):
+            continue
+        rows.append([
+            item.get("id") or "—",
+            item.get("label") or item.get("id") or "—",
+            _yn(bool(item.get("detected"))),
+            _yn(item.get("installed") == "present"),
+            _via_label(item.get("via") if isinstance(item.get("via"), list) else None),
+        ])
+    _table(
+        console,
+        [t("col.id"), t("col.client"), t("col.detected"), t("col.installed"), t("col.via")],
+        rows,
+    )
+
+
+def _render_skill_list(console: Console, data: dict[str, Any]) -> None:
+    bundled = data.get("bundled") or []
+    if bundled:
+        first = bundled[0] if isinstance(bundled[0], dict) else {}
+        files = first.get("files") or []
+        extra = f"  ({', '.join(str(name) for name in files)})" if files else ""
+        console.print(f"[accent]{first.get('name') or 'openwrt-ops'}[/accent]{extra}")
+        if first.get("path"):
+            console.print(f"[muted]{first['path']}[/muted]")
+    copies = data.get("copies") or data.get("installed") or []
+    rows = []
+    for item in copies:
+        if not isinstance(item, dict):
+            continue
+        rows.append([
+            item.get("label") or item.get("client") or "—",
+            item.get("status") or "—",
+            item.get("path") or "—",
+            _yn(item.get("project") == "present"),
+        ])
+    _table(
+        console,
+        [t("col.client"), t("col.status"), t("col.path"), t("col.project_copy")],
+        rows,
+    )
+
+
+def _render_skill_plan(console: Console, data: dict[str, Any]) -> None:
+    console.print(f"[accent]{t('skill.install.plan')}[/accent]")
+    rows = []
+    for item in data.get("planned") or []:
+        if not isinstance(item, dict):
+            continue
+        check = str(item.get("status") or "")
+        label = {
+            "ready": t("skill.plan.ready"),
+            "exists": t("skill.plan.exists"),
+            "forbidden": t("skill.plan.forbidden"),
+            "not_writable": t("skill.plan.not_writable"),
+        }.get(check, check or "—")
+        rows.append([
+            item.get("label") or item.get("client") or "—",
+            label,
+            item.get("path") or "—",
+        ])
+    _table(console, [t("col.client"), t("col.status"), t("col.path")], rows)
+
+
+def _render_skill(console: Console, data: dict[str, Any]) -> None:
+    installed = data.get("installed") or []
+    removed = data.get("removed") or []
+    if installed:
+        _table(
+            console,
+            [t("col.client"), t("col.scope"), t("col.status"), t("col.path")],
+            [[r.get("client"), r.get("scope"), r.get("status"), r.get("path")] for r in installed if isinstance(r, dict)],
+        )
+    if removed:
+        _table(
+            console,
+            [t("col.client"), t("col.status"), t("col.path")],
+            [[r.get("client"), r.get("status"), r.get("path")] for r in removed if isinstance(r, dict)],
+        )
+
+
+def _render_mcp_path(console: Console, data: dict[str, Any]) -> None:
+    rows = []
+    for item in data.get("paths") or []:
+        if not isinstance(item, dict):
+            continue
+        rows.append([
+            item.get("label") or item.get("id") or "—",
+            item.get("id") or "—",
+            item.get("format") or "—",
+            item.get("user") or "—",
+            item.get("project") or "—",
+        ])
+    _table(
+        console,
+        [t("col.client"), t("col.id"), t("col.format"), t("col.mcp_user"), t("col.mcp_project")],
+        rows,
+    )
+
+
+def _render_mcp_guide(console: Console, data: dict[str, Any]) -> None:
+    console.print(t("mcp.guide.intro"))
+    commands = data.get("commands") or {}
+    rows = [
+        [commands.get("json") or "openwrt mcp json", t("mcp.guide.next_json")],
+        [commands.get("prompt") or "openwrt mcp prompt", t("mcp.guide.next_prompt")],
+        [commands.get("path") or "openwrt mcp path", t("mcp.guide.next_path")],
+    ]
+    _table(console, [t("col.command"), t("col.detail")], rows)
+    console.print(t("mcp.guide.no_write"))
+    launch = data.get("launch") if isinstance(data.get("launch"), dict) else {}
+    if launch.get("command"):
+        extra = " ".join([str(launch["command"]), *(launch.get("args") or [])])
+        console.print(f"{t('mcp.guide.launch')}: {extra}")
+
+
 def _render_config(console: Console, data: dict[str, Any]) -> None:
     transport = (data.get("transport") or "").lower()
     rows = [
@@ -611,6 +764,8 @@ def _render_config(console: Console, data: dict[str, Any]) -> None:
         rows.append([t("cfg.verify_ssl"), t("label.yes") if verify else t("label.no")])
         rows.append([t("cfg.url"), f"{data.get('scheme') or 'https'}://{data.get('host') or '—'}:{data.get('port') or '—'}/ubus"])
     rows.append([t("cfg.password"), data.get("password") or "—"])
+    mcp = data.get("mcp") if isinstance(data.get("mcp"), dict) else {}
+    rows.append([t("cfg.mcp_mode"), mcp.get("mode") or "—"])
     _table(console, [t("col.item"), t("col.value")], rows)
 
 

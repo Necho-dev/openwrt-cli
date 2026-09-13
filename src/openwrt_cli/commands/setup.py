@@ -5,7 +5,7 @@ import os
 import typer
 from rich.console import Console
 
-from openwrt_cli.core.config import ConfigManager
+from openwrt_cli.core.config import ConfigManager, mcp_mode, normalize_config
 from openwrt_cli.core.connection import open_connection
 from openwrt_cli.core.errors import DeviceConnectionError
 from openwrt_cli.i18n import detect_system_language, normalize_language, set_language, t
@@ -164,10 +164,12 @@ def run_setup(console: Console, config_path: str | None = None) -> None:
                 rows.append((t("cfg.identity"), identity_file))
         if hostname:
             rows.append((t("cfg.hostname"), hostname))
+        rows.append((t("cfg.mcp_mode"), mcp_mode(normalize_config(new_cfg))))
         console.print()
         console.print(setup_complete_panel(rows, [
             "openwrt doctor",
-            "openwrt network neighbors",
+            "openwrt skill install",
+            "openwrt mcp json",
             "openwrt tui",
         ]))
     except DeviceConnectionError as e:

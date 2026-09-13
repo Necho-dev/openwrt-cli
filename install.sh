@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # OpenWrt CLI — Linux / macOS installer (CLI/TUI palette)
 #   curl -fsSL https://raw.githubusercontent.com/Necho-dev/openwrt-cli/main/install.sh | bash
-#   ./install.sh   (from a clone → pip install -e .)
+#   ./install.sh   (from a clone → pip install -e ".[mcp]")
 
 set -euo pipefail
 
@@ -68,8 +68,10 @@ _() {
       next) echo "接下来" ;;
       setup_q) echo "现在运行 openwrt setup？（连接向导）[Y/n] " ;;
       skip_setup) echo "稍后运行: openwrt setup" ;;
+      skill_q) echo "现在安装 Agent skill（openwrt-ops）？[Y/n] " ;;
+      skip_skill) echo "稍后运行: openwrt skill install" ;;
       no_bin) echo "已安装，但找不到 openwrt 命令。请重开终端后再试。" ;;
-      fail) echo "安装失败。可改用: pipx install $PIP_GIT" ;;
+      fail) echo "安装失败。可改用: pipx install '$PIP_GIT'" ;;
       *) echo "$1" ;;
     esac
   else
@@ -88,8 +90,10 @@ _() {
       next) echo "Next" ;;
       setup_q) echo "Run openwrt setup now (connection wizard)? [Y/n] " ;;
       skip_setup) echo "Later: openwrt setup" ;;
+      skill_q) echo "Install the Agent skill (openwrt-ops) now? [Y/n] " ;;
+      skip_skill) echo "Later: openwrt skill install" ;;
       no_bin) echo "Installed, but the openwrt command was not found. Open a new terminal and retry." ;;
-      fail) echo "Install failed. Try: pipx install $PIP_GIT" ;;
+      fail) echo "Install failed. Try: pipx install '$PIP_GIT'" ;;
       *) echo "$1" ;;
     esac
   fi
@@ -157,9 +161,12 @@ pip_install() {
   fi
   if command -v pipx >/dev/null 2>&1; then
     if [ "${1:-}" = "-e" ]; then
-      pipx install -e "$2"
+      local target="${2%%\[*}"
+      pipx install -e "$target" || return 1
+      pipx inject openwrt-cli mcp >/dev/null 2>&1 || true
     else
-      pipx install "$1"
+      pipx install "$1" || return 1
+      pipx inject openwrt-cli mcp >/dev/null 2>&1 || true
     fi
     return 0
   fi
@@ -173,10 +180,10 @@ has_tty() {
 print_next() {
   printf "\n${C_MUTED}── %s ──${C_RESET}\n\n" "$(_ next)"
   printf "  ${C_ACCENT}openwrt setup${C_RESET}                 ${C_MUTED}# language + connection wizard${C_RESET}\n"
+  printf "  ${C_ACCENT}openwrt skill install${C_RESET}         ${C_MUTED}# openwrt-ops for detected Agents${C_RESET}\n"
+  printf "  ${C_ACCENT}openwrt mcp json${C_RESET}              ${C_MUTED}# paste-ready mcpServers.openwrt${C_RESET}\n"
   printf "  ${C_ACCENT}openwrt doctor${C_RESET}                ${C_MUTED}# SSH / HTTP health${C_RESET}\n"
   printf "  ${C_ACCENT}openwrt tui${C_RESET}                   ${C_MUTED}# dashboard${C_RESET}\n"
-  printf "  ${C_ACCENT}openwrt network interfaces${C_RESET}    ${C_MUTED}# WAN / LAN / lo${C_RESET}\n"
-  printf "  ${C_ACCENT}openwrt network neighbors${C_RESET}     ${C_MUTED}# DHCP + vendor${C_RESET}\n"
   printf "\n"
 }
 
@@ -205,13 +212,13 @@ main() {
   root="$(repo_root || true)"
   if [ -n "$root" ]; then
     info "$(_ local)"
-    if ! pip_install -e "$root"; then
+    if ! pip_install -e "${root}[mcp]"; then
       error "$(_ fail)"
       exit 1
     fi
   else
     info "$(_ remote)"
-    if ! pip_install "$PIP_GIT"; then
+    if ! pip_install "openwrt-cli[mcp] @ ${PIP_GIT}"; then
       error "$(_ fail)"
       exit 1
     fi
@@ -240,6 +247,12 @@ main() {
     case "$ans" in
       ""|y|Y|yes|YES) "$bin" setup ;;
       *) info "$(_ skip_setup)" ;;
+    esac
+    printf "${C_ACCENT}%s${C_RESET}" "$(_ skill_q)"
+    IFS= read -r ans < /dev/tty || true
+    case "$ans" in
+      ""|y|Y|yes|YES) "$bin" skill install ;;
+      *) info "$(_ skip_skill)" ;;
     esac
   fi
 }

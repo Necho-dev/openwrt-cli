@@ -16,7 +16,6 @@ ROOT = Path(__file__).resolve().parents[2]
 CHANGELOG = ROOT / "CHANGELOG.md"
 CHANGELOG_ZH = ROOT / "CHANGELOG.zh.md"
 PYPROJECT = ROOT / "pyproject.toml"
-NOTES = ROOT / "release-notes.md"
 PROJECT = "openwrt-cli"
 USER_AGENT = "openwrt-cli-release-preflight"
 VERSION_HEADING = re.compile(r"^##[ \t]+\[v?([0-9][^]\s]*)\]", re.MULTILINE)
@@ -138,6 +137,18 @@ def write_output(version: str) -> None:
         handle.write(f"version={version}\n")
 
 
+def write_release_notes(text: str) -> Path | None:
+    """Persist notes only when CI sets RELEASE_NOTES_FILE. Local pytest / dry runs stay clean."""
+    raw = os.environ.get("RELEASE_NOTES_FILE", "").strip()
+    if not raw:
+        return None
+    path = Path(raw)
+    if not path.is_absolute():
+        path = ROOT / path
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
 def main() -> None:
     version = pyproject_version()
     tag = tag_version()
@@ -146,11 +157,12 @@ def main() -> None:
         fail(f"Tag '{ref}' (version {tag}) does not match pyproject.toml ({version})")
     require_changelog_alignment(version)
     pypi_has_version(version)
-    NOTES.write_text(release_notes(version), encoding="utf-8")
+    notes = release_notes(version)
+    write_release_notes(notes)
     write_output(version)
     print(f"Preflight OK: {PROJECT} {version} (tag v{version})")
     print("--- release notes ---")
-    print(NOTES.read_text(encoding="utf-8"), end="")
+    print(notes, end="")
 
 
 if __name__ == "__main__":

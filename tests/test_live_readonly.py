@@ -31,6 +31,14 @@ _OPTIONAL = (
     (["-f", "json", "qos", "status"], {"ok"}),
     (["-f", "json", "network", "wifi", "list"], {"ok"}),
     (["-f", "json", "network", "dns"], {"ok"}),
+    (["-f", "json", "passwall2", "status"], {"ok"}),
+    (["-f", "json", "passwall2", "nodes"], {"ok"}),
+    (["-f", "json", "passwall2", "subscribe"], {"ok"}),
+    (["-f", "json", "passwall2", "settings"], {"ok"}),
+    (["-f", "json", "passwall2", "rules"], {"ok"}),
+    (["-f", "json", "passwall2", "components"], {"ok"}),
+    (["-f", "json", "passwall2", "acl"], {"ok"}),
+    (["-f", "json", "passwall2", "logs", "--tail", "5"], {"ok"}),
 )
 
 
@@ -64,7 +72,7 @@ def test_readonly_json(args: list[str], keys: set[str], run_cli, parse_json, red
 @pytest.mark.parametrize("args,keys", _OPTIONAL, ids=[" ".join(a) for a, _ in _OPTIONAL])
 def test_readonly_optional(args: list[str], keys: set[str], run_cli, parse_json, redact) -> None:
     _require_live()
-    proc = run_cli(*args, timeout=90)
+    proc = run_cli(*args, timeout=180)
     if proc.returncode != 0:
         pytest.skip(redact((proc.stderr or proc.stdout)[:240]))
     data = parse_json(proc)
@@ -90,6 +98,36 @@ def test_interfaces_use_role_device_labels(run_cli, redact) -> None:
     out = proc.stdout
     assert "WAN(" in out or "LAN(" in out or "LOOPBACK(" in out
     assert "Static address" not in out
+
+
+def test_passwall2_show_first_items(run_cli, parse_json, redact) -> None:
+    _require_live()
+    nodes = run_cli("-f", "json", "passwall2", "nodes", timeout=180)
+    if nodes.returncode != 0:
+        pytest.skip(redact((nodes.stderr or nodes.stdout)[:240]))
+    node_data = parse_json(nodes)
+    assert node_data.get("ok") is True
+    first = (node_data.get("nodes") or [None])[0]
+    if first and first.get("id"):
+        shown = run_cli("-f", "json", "passwall2", "node", "show", str(first["id"]))
+        assert shown.returncode == 0, redact(shown.stderr or shown.stdout)
+        body = parse_json(shown)
+        assert body.get("ok") is True
+        assert (body.get("node") or {}).get("id") == first["id"]
+        blob = json.dumps(body)
+        assert "stok=" not in blob
+        assert "sysauth" not in blob.lower()
+    acls = run_cli("-f", "json", "passwall2", "acl")
+    assert acls.returncode == 0, redact(acls.stderr or acls.stdout)
+    acl_data = parse_json(acls)
+    assert acl_data.get("ok") is True
+    rule = (acl_data.get("acl") or [None])[0]
+    if rule and rule.get("id"):
+        shown = run_cli("-f", "json", "passwall2", "acl", "show", str(rule["id"]))
+        assert shown.returncode == 0, redact(shown.stderr or shown.stdout)
+        body = parse_json(shown)
+        assert body.get("ok") is True
+        assert (body.get("acl") or {}).get("id") == rule["id"]
 
 
 def test_routes_and_rules_columns(run_cli, redact) -> None:

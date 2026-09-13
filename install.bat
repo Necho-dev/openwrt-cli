@@ -132,9 +132,9 @@ set "ANS=Y"
 set /p ANS="!MSG_SETUP_Q!"
 if "!ANS!"=="" set "ANS=Y"
 if /i "!ANS!"=="y" (
-  where openwrt >nul 2>&1 && openwrt setup || %PYTHON% -m openwrt_cli setup
+  where openwrt >nul 2>&1 && openwrt setup || %PYTHON% -m openwrt_cli.app setup
 ) else if /i "!ANS!"=="yes" (
-  where openwrt >nul 2>&1 && openwrt setup || %PYTHON% -m openwrt_cli setup
+  where openwrt >nul 2>&1 && openwrt setup || %PYTHON% -m openwrt_cli.app setup
 ) else (
   echo  %C_ACCENT%[i]%C_RESET%  !MSG_SKIP!
 )

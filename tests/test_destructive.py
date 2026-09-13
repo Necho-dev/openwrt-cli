@@ -14,6 +14,7 @@ def test_json_destructive_requires_yes():
         ["-f", "json", "system", "shutdown"],
         ["-f", "json", "system", "hostname", "NewName"],
         ["-f", "json", "network", "reload"],
+        ["-f", "json", "network", "set-hostname", "--mac", "aa:bb:cc:dd:ee:ff", "--name", "x"],
         ["-f", "json", "service", "restart", "firewall"],
     ):
         result = runner.invoke(app, args)

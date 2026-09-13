@@ -23,13 +23,17 @@
 
 <table>
   <tr>
-    <td align="center" valign="top" width="50%">
+    <td align="center" valign="top" width="33%">
       <p><strong>网络</strong></p>
       <img src="docs/assets/tui-network.png" alt="TUI 网络" width="2000">
     </td>
-    <td align="center" valign="top" width="50%">
+    <td align="center" valign="top" width="33%">
       <p><strong>邻居</strong></p>
       <img src="docs/assets/tui-neighbors.png" alt="TUI 邻居" width="2000">
+    </td>
+    <td align="center" valign="top" width="33%">
+      <p><strong>PassWall2*</strong></p>
+      <img src="docs/assets/tui-passwall2.png" alt="TUI PassWall2：节点表、Ping / TCPing、新建 / 编辑 / 删除" width="2000">
     </td>
   </tr>
 </table>
@@ -51,11 +55,14 @@
   </tr>
 </table>
 
+\* PassWall2 需要 **openwrt-cli &gt;= 1.1.0**，路由器上还需 `luci-app-passwall2`。
+
 ## 核心功能
 
 - **三层交互** — CLI 表格、`setup` + `wizard`、以及 `openwrt tui`
 - **doctor** — 按 SSH/HTTP 能力做体检，结果结构化，可直接 `-f json`
 - **网络** — 接口、路由、规则、邻居、带 MAC 厂商的 DHCP 租约，可选 Bandix 历史速率
+- **PassWall2** — 可选 `luci-app-passwall2`；**需要 openwrt-cli &gt;= 1.1.0**。读状态 / 节点 / ACL / 日志；可增删改节点与 ACL；探测到插件时出现 TUI 第 `7` 页
 - **同一套设备模型** — SSH 与 HTTP 共用 ubus / uci / shell 语义；缺能力就明确失败（不造假数据）
 - **Agent-ready** — `-f json` / `-f compact`，不依赖 TTY 或颜色
 - **中英界面** — 命令名始终是英文
@@ -166,6 +173,7 @@ openwrt network interfaces --rates
 openwrt network routes
 openwrt network rules
 openwrt network neighbors          # IPv4 邻居；有 Bandix 时叠加设备速率
+openwrt network set-hostname --mac aa:bb:cc:dd:ee:ff --name phone --yes
 openwrt network leases
 openwrt network metrics            # Bandix 历史（需要 luci-app-bandix）
 openwrt network metrics --ip 192.168.1.50 --since 30m
@@ -175,6 +183,25 @@ openwrt network reload --yes
 ```
 
 `qos` 读的是 OpenWrt SQM / `tc`（`luci-app-sqm`），不是 Bandix 每设备限速。
+
+### passwall2
+
+需要 **openwrt-cli &gt;= 1.1.0**，路由器上还要有 `luci-app-passwall2`。更早的 CLI 没有这组命令，也不会出现第 7 页。
+
+探测到插件后，TUI 增加第 `7` 页：节点 / 订阅 / 设置 / 规则 / ACL / 日志。节点表显示类型、协议、地址、端口、Ping、TCPing，右侧是当前节点详情。快捷键：`a` 新建、`e` 编辑、`Del` 删除、`p` Ping、`c` TCPing、`[` `]` 切子页。
+
+只读：状态、节点（进入/刷新时测 Ping 与 TCPing）、订阅、高级设置、组件、访问控制、运行日志。写入走 UCI（`node add/set/delete`、`acl add/set/delete`、`acl source add/remove`）；`--apply` 会重启 PassWall2。不做订阅拉取、清空日志或组件升级。
+
+```bash
+openwrt passwall2 status
+openwrt passwall2 nodes
+openwrt passwall2 node show <id>
+openwrt passwall2 node add --from-url 'vless://...' --apply --yes
+openwrt passwall2 node set <id> --remarks HK --yes
+openwrt passwall2 acl
+openwrt passwall2 acl add --remarks iot --sources 192.168.9.10 --yes
+openwrt passwall2 logs --tail 80
+```
 
 ### firewall / qos
 
@@ -206,7 +233,7 @@ openwrt wizard wifi            # user | hostname | wifi | lan | service
 openwrt tui
 ```
 
-TUI 快捷键：`1`–`6` 切页，`r` 刷新，`f` 过滤，`q` 退出，`?` 帮助。
+TUI 快捷键：`1`–`6` 切页（有 `luci-app-passwall2` 时为第 `7` 页；**需要 openwrt-cli &gt;= 1.1.0**），`r` 刷新，`e` 编辑（Neighbors 主机名 / PassWall2 节点或 ACL），`f` 过滤，`q` 退出，`?` 帮助。
 
 ## 配置
 
@@ -285,6 +312,8 @@ openwrt --https system status
 **HTTP 下 `firewall rules` 失败** — 这条路径需要 iptables。改用 `--ssh`，或只用 `firewall zones` 这类 UCI 命令。
 
 **JSON / 管道里执行 reboot、reload、restart 报错** — 加上 `--yes`。
+
+**没有 `passwall2` 命令 / TUI 没有第 7 页** — 该能力从 **openwrt-cli &gt;= 1.1.0** 起提供。请升级 CLI，并在路由器上安装 `luci-app-passwall2`。`openwrt -v` 可查看当前版本。
 
 **PATH 里找不到 `openwrt`** — `pip install --user` 可能把脚本装到 `python -m site --user-base` + `/bin`。把该目录加入 PATH，或改用 `pipx`。
 

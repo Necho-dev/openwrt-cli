@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Annotated, Literal
 
 import typer
@@ -8,6 +9,7 @@ from openwrt_cli.context import AppContext
 from openwrt_cli.core.errors import CapabilityError, DeviceCommandError, DeviceConnectionError
 from openwrt_cli.i18n import _, t
 from openwrt_cli.services.result import CommandResult
+from openwrt_cli.services.system import parse_log_time
 from openwrt_cli.ui.render import emit, emit_failure
 
 FormatOpt = Annotated[
@@ -49,6 +51,23 @@ def require_host(app: AppContext) -> None:
 
 def refuse_interactive(app: AppContext, name: str) -> None:
     fail(app, t("msg.interactive", name=name), exit_code=2, error="interactive")
+
+
+def parse_time_window(since: str | None, until: str | None) -> tuple[datetime | None, datetime | None]:
+    since_dt = _parse_time_option("since", since)
+    until_dt = _parse_time_option("until", until)
+    if since_dt and until_dt and since_dt > until_dt:
+        raise typer.BadParameter(t("err.since_until"))
+    return since_dt, until_dt
+
+
+def _parse_time_option(label: str, value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        return parse_log_time(value)
+    except ValueError as e:
+        raise typer.BadParameter(t("err.time_parse", label=label, error=e)) from e
 
 
 def run_service(app: AppContext, fn) -> None:

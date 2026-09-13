@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import ipaddress
 from typing import Any
+from weakref import WeakSet
 
 from openwrt_cli.core.device import DeviceClient
 from openwrt_cli.core.errors import DeviceCommandError, DeviceConnectionError
 from openwrt_cli.core.mac_vendor import lookup_enhanced
+from openwrt_cli.i18n import t
 
 _ABSENT_HINTS = (
     "object not found",
@@ -254,13 +256,13 @@ def _ip_sort_key(ip: str) -> tuple:
 class BandixService:
     """Probe luci.bandix; cache absence per device so we do not retry forever."""
 
-    _absent: set[int] = set()
+    _absent: WeakSet[Any] = WeakSet()
 
     def __init__(self, device: DeviceClient):
         self.device = device
 
     def available(self) -> bool:
-        return id(self.device) not in self._absent
+        return self.device not in self._absent
 
     def overlay(self) -> dict[str, Any] | None:
         """Return {devices, connections} when present; None if missing/denied."""
@@ -270,7 +272,7 @@ class BandixService:
             raw = self.device.ubus.call("luci.bandix", "getStatus", timeout=5)
         except DeviceCommandError as e:
             if _is_absent(e):
-                self._absent.add(id(self.device))
+                self._absent.add(self.device)
             return None
         except DeviceConnectionError:
             return None
@@ -296,8 +298,37 @@ class BandixService:
             raw = self.device.ubus.call("luci.bandix", "getMetrics", params, timeout=6)
         except DeviceCommandError as e:
             if _is_absent(e):
-                self._absent.add(id(self.device))
+                self._absent.add(self.device)
             return None
         except DeviceConnectionError:
             return None
         return parse_metrics(raw)
+
+    def set_hostname(self, mac: str, hostname: str) -> dict[str, Any]:
+        """Bind or clear a Bandix hostname. Empty hostname removes the binding."""
+        key = norm_mac(mac)
+        if not key:
+            raise DeviceCommandError(t("msg.neigh_pick"))
+        if not self.available():
+            raise DeviceCommandError(t("err.no_bandix"))
+        name = str(hostname or "").strip()
+        try:
+            raw = self.device.ubus.call(
+                "luci.bandix",
+                "setHostname",
+                {"mac": key, "hostname": name},
+                timeout=12,
+            )
+        except DeviceCommandError as e:
+            text = str(e).lower()
+            if "access denied" in text or "permission denied" in text:
+                raise DeviceCommandError(t("err.bandix_write_denied")) from e
+            if _is_absent(e):
+                self._absent.add(self.device)
+                raise DeviceCommandError(t("err.no_bandix")) from e
+            raise
+        if isinstance(raw, dict) and raw.get("success") in {0, False}:
+            raise DeviceCommandError(
+                str(raw.get("error") or raw.get("message") or t("err.neigh_rename"))
+            )
+        return {"mac": key, "hostname": name, "cleared": not name}

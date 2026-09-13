@@ -51,6 +51,7 @@ class DoctorService:
         if not quick:
             checks.append(self._safe(self._wan))
             checks.append(self._safe(self._qos))
+        checks.append(self._safe(self._passwall2))
 
         worst = {c["status"] for c in checks}
         ok = "fail" not in worst
@@ -223,3 +224,16 @@ class DoctorService:
             return _check("qos", "QoS", "ok", [t("doctor.sqm_on") if enabled or sqm else t("doctor.sqm_off")])
         except _CHECK_ERRORS:
             return _check("qos", "QoS", "ok", [t("doctor.sqm_missing")])
+
+    def _passwall2(self) -> dict[str, Any]:
+        from openwrt_cli.services.passwall2 import PassWall2Service
+
+        svc = PassWall2Service(self.device)
+        if not svc.available():
+            return _check("passwall2", t("doctor.passwall2"), "skip", [t("doctor.pw2_missing")])
+        data = (svc.status().data or {})
+        details = [
+            t("doctor.pw2_node", name=data.get("node_remarks") or data.get("node") or "—"),
+            t("doctor.pw2_running", v=t("label.yes") if data.get("running") else t("label.no")),
+        ]
+        return _check("passwall2", t("doctor.passwall2"), "ok", details)

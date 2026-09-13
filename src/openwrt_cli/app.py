@@ -18,6 +18,7 @@ from openwrt_cli.commands.doctor import doctor_app
 from openwrt_cli.commands.firewall import firewall_app
 from openwrt_cli.commands.logs import register_logs
 from openwrt_cli.commands.network import network_app
+from openwrt_cli.commands.passwall2 import pw2_app
 from openwrt_cli.commands.qos import qos_app
 from openwrt_cli.commands.service import service_app
 from openwrt_cli.commands.setup import run_setup
@@ -194,6 +195,7 @@ app.add_typer(network_app, name="network", help=_("help.network"))
 app.add_typer(firewall_app, name="firewall", help=_("help.firewall"))
 app.add_typer(qos_app, name="qos", help=_("help.qos"))
 app.add_typer(service_app, name="service", help=_("help.service"))
+app.add_typer(pw2_app, name="passwall2", help=_("help.passwall2"))
 app.add_typer(user_app, name="user", help=_("help.user"))
 app.add_typer(backup_app, name="backup", help=_("help.backup"))
 app.add_typer(system_app, name="system", help=_("help.system"))
@@ -334,3 +336,7 @@ def main() -> None:
     init_language(explicit=lang, config_path=config_path)
     sys.argv = [sys.argv[0], *hoist_global_options(sys.argv[1:])]
     app(prog_name="openwrt")
+
+
+if __name__ == "__main__":
+    main()

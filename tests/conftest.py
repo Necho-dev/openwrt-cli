@@ -29,9 +29,13 @@ def _redact(text: str) -> str:
 
 
 def _run_cli(*args: str, timeout: int = 60) -> subprocess.CompletedProcess[str]:
+    env = os.environ.copy()
+    src = str(ROOT / "src")
+    env["PYTHONPATH"] = src + os.pathsep + env.get("PYTHONPATH", "")
     return subprocess.run(
-        [sys.executable, "-m", "openwrt_cli", *args],
+        [sys.executable, "-m", "openwrt_cli.app", *args],
         cwd=ROOT,
+        env=env,
         capture_output=True,
         text=True,
         timeout=timeout,

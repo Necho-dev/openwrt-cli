@@ -4,13 +4,15 @@ from __future__ import annotations
 
 import http.client
 import json
+import secrets
 import socket
 import ssl
 import threading
 import time
 from typing import Any, Literal
+from urllib.parse import urlencode
 
-from openwrt_cli.core.channels.uci import option_from_values, resolve_section
+from openwrt_cli.core.channels.uci import encode_uci_values, option_from_values, resolve_section, section_id_from_add
 from openwrt_cli.core.config import resolve_http_port
 from openwrt_cli.core.device import Capability, DeviceBase
 from openwrt_cli.core.errors import CapabilityError, DeviceCommandError, DeviceConnectionError
@@ -42,6 +44,34 @@ _HTTP_CAPS = frozenset({
     Capability.INITD,
 })
 
+_LUCI_EXACT = frozenset({
+    "get_log",
+    "get_acl_log",
+    "get_redir_log",
+    "ping_node",
+    "urltest_node",
+    "get_now_use_node",
+    "get_node",
+    "check_passwall2",
+})
+_LUCI_COM = frozenset({
+    "geoview", "sing-box", "singbox", "xray", "hysteria", "hysteria2",
+})
+_LUCI_PREFIX = ("version_", "check_")
+
+
+def luci_action_allowed(action: str) -> bool:
+    """Read-only PassWall2 dispatcher actions. Writes such as clear_log are rejected."""
+    name = (action or "").strip()
+    if not name or "/" in name or ".." in name or "\\" in name:
+        return False
+    if name in _LUCI_EXACT:
+        return True
+    for prefix in _LUCI_PREFIX:
+        if name.startswith(prefix):
+            return name[len(prefix):] in _LUCI_COM
+    return False
+
 
 class _HTTPUbus:
     def __init__(self, device: HTTPDevice):
@@ -69,13 +99,49 @@ class _HTTPUci:
         if len(parts) < 3:
             raise DeviceCommandError(t("err.uci_set", path=path))
         config, section, option = parts[0], parts[1], parts[2]
-        values = self.show(config)
-        section = resolve_section(values, section)
+        self.set_values(config, section, {option: value})
+
+    def set_values(self, config: str, section: str, values: dict[str, Any]) -> None:
+        payload = encode_uci_values(values)
+        if not payload:
+            return
+        shown = self.show(config)
+        section = resolve_section(shown, section)
         self._device.call("uci", "set", {
             "config": config,
             "section": section,
-            "values": {option: value},
+            "values": payload,
         })
+
+    def add(self, config: str, typ: str, values: dict[str, Any] | None = None, name: str | None = None) -> str:
+        params: dict[str, Any] = {"config": config, "type": typ}
+        if name:
+            params["name"] = name
+        encoded = encode_uci_values(values)
+        if encoded:
+            params["values"] = encoded
+        data = self._device.call("uci", "add", params)
+        sid = section_id_from_add(data)
+        if not sid:
+            raise DeviceCommandError(t("err.uci_add", config=config, typ=typ))
+        return sid
+
+    def delete(
+        self,
+        config: str,
+        section: str,
+        option: str | None = None,
+        options: list[str] | None = None,
+    ) -> None:
+        shown = self.show(config)
+        section = resolve_section(shown, section)
+        params: dict[str, Any] = {"config": config, "section": section}
+        names = [item for item in (options or ([option] if option else [])) if item]
+        if len(names) == 1:
+            params["option"] = names[0]
+        elif names:
+            params["options"] = names
+        self._device.call("uci", "delete", params)
 
     def commit(self, config: str | None = None) -> None:
         params: dict[str, Any] = {"config": config} if config else {}
@@ -165,6 +231,9 @@ class HTTPDevice(DeviceBase):
         self._uci = _HTTPUci(self)
         self._shell = _HTTPShell()
         self._fs = _HTTPFs(self)
+        self._luci_token = ""
+        self._luci_sid = ""
+        self._luci_form_authed = False
         self._login()
 
     @classmethod
@@ -226,6 +295,23 @@ class HTTPDevice(DeviceBase):
             self._session_timeout = max(30, int(data.get("timeout") or 300))
         except (TypeError, ValueError):
             self._session_timeout = 300
+        self._install_luci_token()
+
+    def _install_luci_token(self) -> None:
+        """Modern LuCI session_retrieve requires values.token. Never log it."""
+        self._luci_form_authed = False
+        if not self.session or self.session == NULL_SESSION:
+            self._luci_token = ""
+            self._luci_sid = ""
+            return
+        self._luci_sid = self.session
+        token = secrets.token_hex(16)
+        try:
+            status, _ = self._call(self.session, "session", "set", {"values": {"token": token}})
+        except (DeviceCommandError, DeviceConnectionError, _SessionExpired, _AccessDenied):
+            self._luci_token = ""
+            return
+        self._luci_token = token if status == UBUS_OK else ""
 
     def _login_hint(self, detail: str) -> str:
         missing_session = "object not found" in detail.lower()
@@ -311,6 +397,171 @@ class HTTPDevice(DeviceBase):
                         raise DeviceConnectionError(t("err.timeout")) from e
                     raise DeviceConnectionError(t("err.router_down_reason", reason=reason)) from e
             raise DeviceConnectionError(t("err.router_down_reason", reason=last_err))
+
+    def _http_request(
+        self,
+        method: str,
+        path: str,
+        *,
+        headers: dict[str, str] | None = None,
+        body: bytes | None = None,
+        timeout: int | None = None,
+    ) -> tuple[int, list[tuple[str, str]], bytes]:
+        wait = float(timeout or self.timeout)
+        hdrs = {"Connection": "keep-alive"}
+        if headers:
+            hdrs.update(headers)
+        with self._http_lock:
+            last_err: Exception | None = None
+            for attempt in range(2):
+                try:
+                    conn = self._ensure_conn(wait)
+                    conn.request(method, path, body, hdrs)
+                    resp = conn.getresponse()
+                    raw = resp.read()
+                    status = resp.status
+                    rh = list(resp.getheaders())
+                    if status >= 500:
+                        self._drop_conn()
+                    return status, rh, raw
+                except (TimeoutError, socket.timeout) as e:
+                    self._drop_conn()
+                    raise DeviceConnectionError(t("err.timeout")) from e
+                except (
+                    http.client.RemoteDisconnected,
+                    http.client.CannotSendRequest,
+                    http.client.ResponseNotReady,
+                    BrokenPipeError,
+                    ConnectionResetError,
+                    ConnectionAbortedError,
+                ) as e:
+                    self._drop_conn()
+                    last_err = e
+                    if attempt == 0:
+                        continue
+                    raise DeviceConnectionError(t("err.router_disconnected")) from e
+                except OSError as e:
+                    self._drop_conn()
+                    reason = str(e)
+                    if "timed out" in reason.lower() or getattr(e, "errno", None) == 60:
+                        raise DeviceConnectionError(t("err.timeout")) from e
+                    raise DeviceConnectionError(t("err.router_down_reason", reason=reason)) from e
+            raise DeviceConnectionError(t("err.router_down_reason", reason=last_err))
+
+    def _luci_cookie(self) -> str:
+        sid = self._luci_sid or self.session or ""
+        return f"sysauth={sid}; sysauth_http={sid}; sysauth_https={sid}"
+
+    def _luci_headers(self) -> dict[str, str]:
+        return {
+            "Cookie": self._luci_cookie(),
+            "Accept": "*/*",
+        }
+
+    def _luci_path(self, action: str, params: dict[str, Any] | None, *, stok: bool) -> str:
+        base = "/cgi-bin/luci"
+        if stok and self._luci_token:
+            base = f"/cgi-bin/luci/;stok={self._luci_token}"
+        path = f"{base}/admin/services/passwall2/{action}"
+        if params:
+            path = f"{path}?{urlencode(params, doseq=True)}"
+        return path
+
+    def _cookie_sid(self, headers: list[tuple[str, str]]) -> str | None:
+        for name, value in headers:
+            if name.lower() != "set-cookie":
+                continue
+            first = (value or "").split(";", 1)[0]
+            if "=" not in first:
+                continue
+            key, val = first.split("=", 1)
+            if key.strip() in {"sysauth", "sysauth_http", "sysauth_https"} and val.strip():
+                return val.strip()
+        return None
+
+    def _luci_form_login(self) -> bool:
+        fields = {
+            "luci_username": self.user,
+            "luci_password": self.password,
+        }
+        if self._luci_token:
+            fields["token"] = self._luci_token
+        body = urlencode(fields).encode("utf-8")
+        status, headers, _raw = self._http_request(
+            "POST",
+            "/cgi-bin/luci",
+            headers={
+                **self._luci_headers(),
+                "Content-Type": "application/x-www-form-urlencoded",
+            },
+            body=body,
+            timeout=max(self.timeout, 20),
+        )
+        sid = self._cookie_sid(headers)
+        if sid:
+            self._luci_sid = sid
+        if status in {200, 302, 303}:
+            self._luci_form_authed = True
+            return True
+        return False
+
+    def _parse_luci_body(self, raw: bytes) -> Any:
+        text = raw.decode("utf-8", errors="replace")
+        stripped = text.strip()
+        if not stripped:
+            return ""
+        if stripped[:1] in "{[":
+            try:
+                return json.loads(stripped)
+            except json.JSONDecodeError:
+                pass
+        return text
+
+    def luci_call(
+        self,
+        action: str,
+        params: dict[str, Any] | None = None,
+        timeout: int | None = None,
+    ) -> Any:
+        """GET a read-only LuCI dispatcher action. Other paths are rejected."""
+        if not luci_action_allowed(action):
+            raise CapabilityError(
+                t("err.luci_denied", action=action),
+                missing=("luci",),
+            )
+        self._maybe_refresh_session()
+        if not self.session or self.session == NULL_SESSION:
+            self._relogin()
+        if not self._luci_token and self.session and self.session != NULL_SESSION:
+            self._install_luci_token()
+        wait = timeout if timeout is not None else max(self.timeout, 20)
+        last_status = None
+        tried_stok = False
+        tried_form = False
+        for _attempt in range(4):
+            path = self._luci_path(action, params, stok=tried_stok)
+            status, _headers, raw = self._http_request(
+                "GET",
+                path,
+                headers=self._luci_headers(),
+                timeout=wait,
+            )
+            last_status = status
+            if status == 200:
+                return self._parse_luci_body(raw)
+            if status == 403:
+                if not tried_stok and self._luci_token:
+                    tried_stok = True
+                    continue
+                if not tried_form:
+                    tried_form = True
+                    if self._luci_form_login():
+                        continue
+                raise DeviceCommandError(t("err.luci_http", action=action, status=status), status=status)
+            if status in {301, 302, 303, 307, 308}:
+                raise DeviceCommandError(t("err.luci_http", action=action, status=status), status=status)
+            raise DeviceCommandError(t("err.luci_http", action=action, status=status), status=status)
+        raise DeviceCommandError(t("err.luci_http", action=action, status=last_status), status=last_status)
 
     def _call(self, sid, obj, method, params=None, timeout=None, batch: bool = False):
         envelope = {

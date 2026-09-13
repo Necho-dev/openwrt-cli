@@ -16,8 +16,43 @@ class UciChannel(Protocol):
     def set(self, path: str, value: str) -> None:
         """path 形如 config.section.option。"""
 
+    def set_values(self, config: str, section: str, values: dict[str, Any]) -> None:
+        """一次写入多个 option；list 保持数组。"""
+
+    def add(self, config: str, typ: str, values: dict[str, Any] | None = None, name: str | None = None) -> str:
+        """新增 section，返回 section id。"""
+
+    def delete(
+        self,
+        config: str,
+        section: str,
+        option: str | None = None,
+        options: list[str] | None = None,
+    ) -> None:
+        """删除 section，或删除其中一个 / 一组 option。"""
+
     def commit(self, config: str | None = None) -> None:
         ...
+
+
+def encode_uci_values(values: dict[str, Any] | None) -> dict[str, Any]:
+    out: dict[str, Any] = {}
+    for key, value in (values or {}).items():
+        if value is None:
+            continue
+        if isinstance(value, list):
+            out[key] = [str(item) for item in value if item not in (None, "")]
+        elif isinstance(value, bool):
+            out[key] = "1" if value else "0"
+        else:
+            out[key] = str(value)
+    return out
+
+
+def section_id_from_add(data: Any) -> str:
+    if isinstance(data, dict):
+        return str(data.get("section") or data.get("name") or "")
+    return str(data or "").strip()
 
 
 def resolve_section(values: dict[str, dict[str, Any]], section: str) -> str:

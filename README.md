@@ -23,13 +23,17 @@ The command is **`openwrt`**. `openwrt-cli` is still installed as a compatibilit
 
 <table>
   <tr>
-    <td align="center" valign="top" width="50%">
+    <td align="center" valign="top" width="33%">
       <p><strong>Network</strong></p>
       <img src="docs/assets/tui-network.png" alt="TUI Network" width="2000">
     </td>
-    <td align="center" valign="top" width="50%">
+    <td align="center" valign="top" width="33%">
       <p><strong>Neighbors</strong></p>
       <img src="docs/assets/tui-neighbors.png" alt="TUI Neighbors" width="2000">
+    </td>
+    <td align="center" valign="top" width="33%">
+      <p><strong>PassWall2*</strong></p>
+      <img src="docs/assets/tui-passwall2.png" alt="TUI PassWall2 — node table, Ping / TCPing, add / edit / delete" width="2000">
     </td>
   </tr>
 </table>
@@ -51,11 +55,14 @@ The command is **`openwrt`**. `openwrt-cli` is still installed as a compatibilit
   </tr>
 </table>
 
+\* PassWall2 requires **openwrt-cli &gt;= 1.1.0** and `luci-app-passwall2` on the router.
+
 ## Features
 
 - **Three surfaces** — CLI tables, `setup` + `wizard`, and `openwrt tui`
 - **doctor** — capability-aware SSH/HTTP health checks, structured, `-f json` ready
 - **Network** — interfaces, routes, rules, neighbors, DHCP leases with MAC vendors, optional Bandix history
+- **PassWall2** — optional `luci-app-passwall2`; **requires openwrt-cli &gt;= 1.1.0**. Read status / nodes / ACL / logs; add, edit, delete nodes and ACL; TUI tab `7` when the package is present
 - **One device model** — SSH and HTTP share ubus / uci / shell semantics; missing capability fails loudly (no fake data)
 - **Agent-ready** — `-f json` / `-f compact`, no TTY or color required
 - **English / 简体中文 UI** — command names stay English
@@ -166,6 +173,7 @@ openwrt network interfaces --rates
 openwrt network routes
 openwrt network rules
 openwrt network neighbors          # IPv4 neighbors; Bandix overlays device rates when present
+openwrt network set-hostname --mac aa:bb:cc:dd:ee:ff --name phone --yes
 openwrt network leases
 openwrt network metrics            # Bandix history (needs luci-app-bandix)
 openwrt network metrics --ip 192.168.1.50 --since 30m
@@ -175,6 +183,25 @@ openwrt network reload --yes
 ```
 
 `qos` is OpenWrt SQM / `tc` (`luci-app-sqm`), not Bandix per-device limits.
+
+### passwall2
+
+Requires **openwrt-cli &gt;= 1.1.0** and `luci-app-passwall2` on the router. Older CLI builds do not have this command group or TUI tab.
+
+When the package is present, TUI adds tab `7` with Nodes / Subscribe / Settings / Rules / ACL / Logs. The node list shows type, protocol, address, port, Ping, and TCPing; the right pane is the selected node. Keys: `a` add, `e` edit, `Del` delete, `p` Ping, `c` TCPing, `[` `]` switch sub-pages.
+
+Read: status, nodes (Ping + TCPing on list enter/refresh), subscribe, settings, components, ACL, and logs. Write nodes and ACL through UCI (`node add/set/delete`, `acl add/set/delete`, `acl source add/remove`); `--apply` restarts PassWall2. No subscribe refresh, clear_log, or component update.
+
+```bash
+openwrt passwall2 status
+openwrt passwall2 nodes
+openwrt passwall2 node show <id>
+openwrt passwall2 node add --from-url 'vless://...' --apply --yes
+openwrt passwall2 node set <id> --remarks HK --yes
+openwrt passwall2 acl
+openwrt passwall2 acl add --remarks iot --sources 192.168.9.10 --yes
+openwrt passwall2 logs --tail 80
+```
 
 ### firewall / qos
 
@@ -206,7 +233,7 @@ openwrt wizard wifi            # user | hostname | wifi | lan | service
 openwrt tui
 ```
 
-TUI keys: `1`–`6` tabs, `r` refresh, `f` filter, `q` quit, `?` help.
+TUI keys: `1`–`6` tabs (`7` PassWall2 when `luci-app-passwall2` is present; **openwrt-cli &gt;= 1.1.0**), `r` refresh, `e` edit (Neighbors hostname / PassWall2 node or ACL), `f` filter, `q` quit, `?` help.
 
 ## Configuration
 
@@ -285,6 +312,8 @@ openwrt --https system status
 **`firewall rules` fails over HTTP** — that path needs iptables. Use `--ssh`, or stick to UCI commands such as `firewall zones`.
 
 **JSON / pipe errors on reboot, reload, restart** — add `--yes`.
+
+**`passwall2` is unknown / no TUI tab 7** — that feature shipped in **openwrt-cli &gt;= 1.1.0**. Upgrade the CLI, and install `luci-app-passwall2` on the router. `openwrt -v` prints the package version.
 
 **`openwrt` is not on PATH** — a `pip install --user` may have dropped the script in `python -m site --user-base` + `/bin`. Add that directory, or install with `pipx`.
 

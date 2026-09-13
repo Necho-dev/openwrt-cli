@@ -8,6 +8,10 @@ class DeviceConnectionError(Exception):
 class DeviceCommandError(Exception):
     """远程命令或 ubus 调用失败。"""
 
+    def __init__(self, message: str = "", *, status: int | None = None):
+        super().__init__(message)
+        self.status = status
+
 
 class CapabilityError(DeviceCommandError):
     """当前传输缺少执行该操作所需的能力。"""

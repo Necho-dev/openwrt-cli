@@ -93,6 +93,21 @@ def network_neighbors(
     )
 
 
+@network_app.command("set-hostname", help=_("help.net.set_hostname"))
+def network_set_hostname(
+    ctx: typer.Context,
+    mac: str = typer.Option(..., "--mac", help=_("help.net.filter_mac")),
+    name: str = typer.Option("", "--name", "--hostname", help=_("help.net.set_hostname_name")),
+    format: FormatOpt = None,
+    yes: YesOpt = False,
+):
+    if not _looks_like_mac(mac):
+        raise typer.BadParameter(t("err.bad_mac", value=mac))
+    app = _svc(ctx, format, yes)
+    require_confirm(app.yes, t("confirm.neigh_rename", mac=mac, name=name.strip() or "—"), fmt=app.format)
+    run_service(app, lambda d: NetworkService(d).set_neighbor_hostname(mac, name))
+
+
 @network_app.command(
     "metrics",
     help=_("help.net.metrics"),

@@ -5,10 +5,15 @@ from __future__ import annotations
 import json
 from typing import Any, Literal
 
-from openwrt_cli.core.channels.uci import option_from_values, resolve_section
+from openwrt_cli.core.channels.uci import encode_uci_values, option_from_values, resolve_section, section_id_from_add
 from openwrt_cli.core.device import Capability, DeviceBase
 from openwrt_cli.core.errors import DeviceCommandError
 from openwrt_cli.core.ssh_client import SSHClient
+from openwrt_cli.i18n import t
+
+
+def _uci_quote(value: str) -> str:
+    return "'" + str(value).replace("'", "'\"'\"'") + "'"
 
 
 class _SSHUbus:
@@ -52,8 +57,75 @@ class _SSHUci:
         return self._ssh.exec(f"uci get {path} 2>/dev/null").strip()
 
     def set(self, path: str, value: str) -> None:
-        safe = value.replace("'", "'\"'\"'")
-        self._ssh.exec(f"uci set {path}='{safe}'")
+        self._ssh.exec(f"uci set {path}={_uci_quote(value)}")
+
+    def set_values(self, config: str, section: str, values: dict[str, Any]) -> None:
+        payload = encode_uci_values(values)
+        if not payload:
+            return
+        section = self.resolve(config, section)
+        try:
+            self._ubus.call("uci", "set", {"config": config, "section": section, "values": payload})
+            return
+        except DeviceCommandError:
+            pass
+        for key, value in payload.items():
+            path = f"{config}.{section}.{key}"
+            if isinstance(value, list):
+                self._ssh.exec(f"uci delete {path} 2>/dev/null || true")
+                for item in value:
+                    self._ssh.exec(f"uci add_list {path}={_uci_quote(item)}")
+            else:
+                self.set(path, str(value))
+
+    def add(self, config: str, typ: str, values: dict[str, Any] | None = None, name: str | None = None) -> str:
+        payload = encode_uci_values(values)
+        try:
+            params: dict[str, Any] = {"config": config, "type": typ}
+            if name:
+                params["name"] = name
+            if payload:
+                params["values"] = payload
+            sid = section_id_from_add(self._ubus.call("uci", "add", params))
+            if sid:
+                return sid
+        except DeviceCommandError:
+            pass
+        if name:
+            self._ssh.exec(f"uci set {config}.{name}={_uci_quote(typ)}")
+            sid = name
+        else:
+            sid = self._ssh.exec(f"uci add {config} {typ}").strip()
+        if not sid:
+            raise DeviceCommandError(t("err.uci_add", config=config, typ=typ))
+        if payload:
+            self.set_values(config, sid, payload)
+        return sid
+
+    def delete(
+        self,
+        config: str,
+        section: str,
+        option: str | None = None,
+        options: list[str] | None = None,
+    ) -> None:
+        section = self.resolve(config, section)
+        names = [item for item in (options or ([option] if option else [])) if item]
+        try:
+            params: dict[str, Any] = {"config": config, "section": section}
+            if len(names) == 1:
+                params["option"] = names[0]
+            elif names:
+                params["options"] = names
+            self._ubus.call("uci", "delete", params)
+            return
+        except DeviceCommandError:
+            pass
+        if names:
+            for key in names:
+                self._ssh.exec(f"uci delete {config}.{section}.{key} 2>/dev/null || true")
+            return
+        self._ssh.exec(f"uci delete {config}.{section}")
 
     def commit(self, config: str | None = None) -> None:
         self._ssh.exec(f"uci commit {config}" if config else "uci commit")

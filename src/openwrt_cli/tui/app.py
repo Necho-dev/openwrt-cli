@@ -12,6 +12,7 @@ from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Button, DataTable, Footer, Input, Link, RichLog, Static, TabbedContent, TabPane
+from textual.widgets._footer import FooterKey
 
 from openwrt_cli.core.device import DeviceClient
 from openwrt_cli.services.monitor import MonitorService
@@ -22,6 +23,26 @@ from openwrt_cli.services.system import SystemService, format_log_line
 from openwrt_cli.tui.bandwidth import BandwidthPanel, DualRateChart
 from openwrt_cli.tui.charts import WINDOW, AreaChart, Series, fmt_bytes_rate, render_legend
 from openwrt_cli.tui.load import LoadPanel
+from openwrt_cli.tui.keyhint import highlight_keys
+from openwrt_cli.tui.optional import probe_optional_apps
+from openwrt_cli.tui.screens.passwall2 import (
+    PW2_CSS,
+    PW2_SUBS,
+    AclFormModal,
+    AclLogModal,
+    NodeFormModal,
+    acl_row,
+    format_acl_detail,
+    format_node_detail,
+    format_rule_detail,
+    format_rules_geo,
+    format_settings,
+    format_subscribe_detail,
+    node_row,
+    setup_passwall2_tables,
+    shunt_row,
+    subscribe_row,
+)
 from openwrt_cli.i18n import _, t
 from openwrt_cli.ui.logo import render_logo_compact
 from openwrt_cli.ui.render import clip_mid, display_iface, display_route_iface
@@ -317,6 +338,12 @@ def _footer() -> Footer:
         return Footer()
 
 
+def _footer_edit_key() -> FooterKey:
+    key = FooterKey("e", "e", t("action.edit"), "edit_or_enable")
+    key.compact = False
+    return key
+
+
 def _conn_status(device) -> Text:
     scheme = (getattr(device, "scheme", None) or "").lower()
     transport = (getattr(device, "transport", "") or "").lower()
@@ -457,6 +484,13 @@ def _svc_action_label(action: str) -> str:
     }.get(action, action)
 
 
+def _svc_pick_detail() -> Text:
+    out = Text(t("svc.pick"))
+    out.append("\n\n")
+    out.append_text(highlight_keys(t("svc.keys")))
+    return out
+
+
 def format_svc_detail(data: dict) -> Text:
     out = Text()
     name = str(data.get("service") or "—")
@@ -494,7 +528,7 @@ def format_svc_detail(data: dict) -> Text:
     out.append("\n")
     out.append(note, style="dim")
     out.append("\n\n")
-    out.append(t("svc.keys"), style="dim #7ec8ff")
+    out.append_text(highlight_keys(t("svc.keys")))
     return out
 
 
@@ -510,7 +544,7 @@ class ConfirmModal(ModalScreen[bool]):
         padding: 1 2;
     }
     #confirm-msg { width: 1fr; padding: 1 0; color: #f2f6fb; text-style: bold; }
-    #confirm-hint { color: #8aa4b8; padding-bottom: 1; }
+    #confirm-hint { padding-bottom: 1; }
     #confirm-btns { height: 3; align: right middle; }
     #confirm-btns Button { margin-left: 1; }
     """
@@ -528,7 +562,7 @@ class ConfirmModal(ModalScreen[bool]):
     def compose(self) -> ComposeResult:
         with Vertical(id="confirm-box"):
             yield Static(self.message, id="confirm-msg")
-            yield Static(t("confirm.hint"), id="confirm-hint")
+            yield Static(highlight_keys(t("confirm.hint")), id="confirm-hint")
             with Horizontal(id="confirm-btns"):
                 yield Button(t("action.cancel"), id="cancel")
                 yield Button(t("action.confirm"), id="ok", variant="error")
@@ -541,6 +575,71 @@ class ConfirmModal(ModalScreen[bool]):
 
     def action_cancel(self) -> None:
         self.dismiss(False)
+
+
+class HostnameModal(ModalScreen[str | None]):
+    """Edit a Bandix device hostname only."""
+
+    CSS = """
+    HostnameModal { align: center middle; }
+    #hn-box {
+        width: 64;
+        max-width: 90%;
+        height: auto;
+        background: #12283f;
+        border: tall #4c8dff;
+        padding: 1 2;
+    }
+    #hn-title { height: 2; color: #7ec8ff; text-style: bold; content-align: left middle; }
+    #hn-input {
+        width: 1fr;
+        height: 3;
+        border: none;
+        padding: 0 1;
+        color: #f2f6fb;
+        background: #16324d;
+    }
+    #hn-hint { height: 1; }
+    #hn-btns { height: 3; align: right middle; }
+    #hn-btns Button { margin-left: 1; min-width: 12; }
+    """
+    BINDINGS = [
+        Binding("escape", "cancel", _("action.cancel"), show=False, priority=True),
+        Binding("ctrl+s", "save", _("action.confirm"), show=False, priority=True),
+    ]
+
+    def __init__(self, target: str, hostname: str) -> None:
+        super().__init__()
+        self.target = target
+        self.hostname = hostname
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="hn-box"):
+            yield Static(t("neigh.rename_title", target=self.target), id="hn-title")
+            yield Input(value=self.hostname, placeholder=t("neigh.rename_placeholder"), id="hn-input")
+            yield Static(highlight_keys(t("neigh.rename_hint")), id="hn-hint")
+            with Horizontal(id="hn-btns"):
+                yield Button(t("action.cancel").upper(), id="cancel")
+                yield Button(t("action.confirm").upper(), id="ok", variant="success")
+
+    def on_mount(self) -> None:
+        self.query_one("#hn-input", Input).focus()
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        if event.input.id == "hn-input":
+            self.action_save()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "ok":
+            self.action_save()
+        else:
+            self.dismiss(None)
+
+    def action_save(self) -> None:
+        self.dismiss(self.query_one("#hn-input", Input).value.strip())
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
 
 
 class OpenWrtTUI(App):
@@ -615,6 +714,15 @@ class OpenWrtTUI(App):
         background: $footer-background;
         color: $footer-description-foreground;
     }
+    #footer-edit {
+        width: auto;
+        height: 1;
+        display: none;
+        background: $footer-background;
+    }
+    #footer-edit.-compact FooterKey {
+        margin-right: 1;
+    }
     Footer {
         dock: none;
         width: 1fr;
@@ -646,7 +754,7 @@ class OpenWrtTUI(App):
         text-style: none;
     }
     #footer-gh:hover { color: #fff; text-style: underline; }
-    """
+    """ + PW2_CSS
     ENABLE_COMMAND_PALETTE = False
     BINDINGS = [
         Binding("q", "quit", _("action.quit")),
@@ -659,10 +767,19 @@ class OpenWrtTUI(App):
         Binding("4", "show_tab('services')", _("tab.services"), show=False),
         Binding("5", "show_tab('process')", _("tab.process"), show=False),
         Binding("6", "show_tab('logs')", _("tab.logs"), show=False),
+        Binding("7", "show_tab('passwall2')", _("tab.passwall2"), show=False),
+        Binding("left_square_bracket", "pw2_prev_sub", _("pw2.sub.nodes"), show=False),
+        Binding("right_square_bracket", "pw2_next_sub", _("pw2.sub.subscribe"), show=False),
+        Binding("p", "pw2_ping('icmp')", _("col.ping"), show=False),
+        Binding("c", "pw2_ping('tcp')", _("col.tcping"), show=False),
+        Binding("l", "pw2_acl_log", _("help.pw2.acl.log"), show=False),
+        Binding("a", "pw2_node_add", _("pw2.node.add"), show=False),
+        Binding("delete", "pw2_node_delete", _("help.pw2.node.delete"), show=False),
+        Binding("backspace", "pw2_node_delete", _("help.pw2.node.delete"), show=False),
         Binding("s", "svc_action('start')", _("action.start"), show=False),
         Binding("x", "svc_action('stop')", _("action.stop"), show=False),
         Binding("t", "svc_action('restart')", _("action.restart"), show=False),
-        Binding("e", "svc_action('enable')", _("action.enable"), show=False),
+        Binding("e", "edit_or_enable", _("action.edit"), show=False),
         Binding("d", "svc_action('disable')", _("action.disable"), show=False),
         Binding("question_mark", "help", _("action.help")),
     ]
@@ -688,6 +805,7 @@ class OpenWrtTUI(App):
         self._lease_rows: list[tuple] = []
         self._lease_mode = "arp"
         self._neigh_by_ip: dict[str, dict] = {}
+        self._neigh_by_mac: dict[str, dict] = {}
         self._bandix_mac = ""
         self._bandix_ip = ""
         self._lease_cursor_ip = ""
@@ -709,6 +827,23 @@ class OpenWrtTUI(App):
         self._proc_focus = ""
         self._proc_detail_pid = ""
         self._session_lost = False
+        self._optional = probe_optional_apps(device)
+        self._pw2 = any(app.id == "passwall2" for app in self._optional)
+        self._pw2_sub = "pw2-nodes"
+        self._pw2_node_rows: list[tuple] = []
+        self._pw2_nodes: list[dict] = []
+        self._pw2_node_by_id: dict[str, dict] = {}
+        self._pw2_sub_rows: list[tuple] = []
+        self._pw2_sub_by_id: dict[str, dict] = {}
+        self._pw2_acl_rows: list[tuple] = []
+        self._pw2_acl_by_id: dict[str, dict] = {}
+        self._pw2_rule_rows: list[tuple] = []
+        self._pw2_rule_by_id: dict[str, dict] = {}
+        self._pw2_focus_node = ""
+        self._pw2_focus_acl = ""
+        self._pw2_focus_sub = ""
+        self._pw2_focus_rule = ""
+        self._pw2_detection = "off"
 
     def compose(self) -> ComposeResult:
         with Horizontal(id="brand"):
@@ -755,17 +890,22 @@ class OpenWrtTUI(App):
             with TabPane(t("tab.services"), id="services"):
                 with Horizontal(id="svc-split"):
                     yield DataTable(id="svc-table")
-                    yield Static(f"{t('svc.pick')}\n\n{t('svc.keys')}", id="svc-detail")
+                    yield Static(_svc_pick_detail(), id="svc-detail")
             with TabPane(t("tab.process"), id="process"):
                 with Horizontal(id="proc-split"):
                     yield DataTable(id="proc-table")
                     yield Static(t("proc.pick"), id="proc-detail")
             with TabPane(t("tab.logs"), id="logs"):
                 yield RichLog(id="log-view", highlight=False, markup=False, wrap=True, max_lines=500)
+            for extra in self._optional:
+                with TabPane(extra.tab_title(), id=extra.id):
+                    yield from extra.compose()
         with Horizontal(id="filter-bar"):
             yield Input(placeholder=t("placeholder.filter"), id="filter-input")
             yield Static("", id="filter-count")
         with Horizontal(id="footer-bar"):
+            with Horizontal(id="footer-edit"):
+                yield _footer_edit_key()
             yield _footer()
             yield Static(_conn_status(self.device), id="conn-status")
             yield Static(display_version(), id="footer-ver")
@@ -784,7 +924,10 @@ class OpenWrtTUI(App):
             table.add_columns(*cols)
             table.cursor_type = "row"
             table.zebra_stripes = True
+        if self._pw2:
+            setup_passwall2_tables(self)
         self.query_one("#filter-bar").display = False
+        self._update_footer_edit()
         self.set_interval(3.0, self.refresh_overview)
         self.set_interval(3.0, self.refresh_process)
         self.set_interval(2.0, self.refresh_logs)
@@ -792,9 +935,61 @@ class OpenWrtTUI(App):
         self.refresh_logs()
 
     def action_refresh(self) -> None:
+        if self._pane == "passwall2":
+            self._pw2_reload()
+            return
         self.refresh_data()
 
+    def _typing_filter(self) -> bool:
+        bar = self.query_one("#filter-bar")
+        if not bar.display:
+            return False
+        return self.query_one("#filter-input", Input).has_focus
+
+    def _on_bandix_neighbors(self) -> bool:
+        if self._pane != "leases" or self._lease_mode != "bandix":
+            return False
+        return not self._typing_filter()
+
+    def _update_footer_edit(self) -> None:
+        show = self._pane == "leases" and self._lease_mode == "bandix"
+        box = self.query_one("#footer-edit")
+        box.display = show
+        if show:
+            footer = self.query_one(Footer)
+            box.set_class(footer.compact, "-compact")
+            self.query_one("#footer-edit FooterKey", FooterKey).compact = footer.compact
+
+    async def _rename_neighbor(self) -> None:
+        mac, ip = self._selected_neighbor_mac_ip()
+        row = self._neigh_by_mac.get(mac) or self._neigh_by_ip.get(ip) or {}
+        if not mac:
+            self.notify(t("msg.neigh_pick"), severity="warning")
+            return
+        current = str(row.get("hostname") or "").strip()
+        if current in {"—", ip}:
+            current = ""
+        name = await self.push_screen_wait(HostnameModal(ip or mac, current))
+        if name is None:
+            return
+        self._set_neighbor_hostname(mac, name)
+
+    @work(thread=True, exclusive=True, group="bandix-write")
+    def _set_neighbor_hostname(self, mac: str, hostname: str) -> None:
+        try:
+            BandixService(self.device).set_hostname(mac, hostname)
+            message = t("msg.neigh_renamed", name=hostname or "—")
+            severity = "information"
+        except Exception as e:
+            message = str(e)
+            severity = "error"
+        self.call_from_thread(self.notify, message, severity=severity)
+        self.call_from_thread(self.refresh_data)
+
     def action_show_tab(self, tab_id: str) -> None:
+        if tab_id == "passwall2" and not self._pw2:
+            self.notify(t("err.pw2_missing"), severity="warning")
+            return
         self.query_one("#tabs", TabbedContent).active = tab_id
 
     def action_filter(self) -> None:
@@ -826,6 +1021,8 @@ class OpenWrtTUI(App):
             self.notify(t("help.svc_keys"))
         elif self._pane == "leases" and self._lease_mode == "bandix":
             self.notify(t("help.neigh_keys"))
+        elif self._pane == "passwall2":
+            self.notify(t("help.pw2.keys"))
         else:
             self.notify(t("help.generic"))
 
@@ -837,11 +1034,17 @@ class OpenWrtTUI(App):
         self._paint_logs()
 
     def on_tabbed_content_tab_activated(self, event: TabbedContent.TabActivated) -> None:
+        if event.tabbed_content.id == "pw2-tabs":
+            self._pw2_sub = event.pane.id if event.pane is not None else "pw2-nodes"
+            self._set_filter_hint()
+            self._pw2_reload()
+            return
         if event.tabbed_content.id != "tabs":
             return
         pane = event.pane.id if event.pane is not None else ""
         self._pane = pane or "overview"
         self._set_filter_hint()
+        self._update_footer_edit()
         if self._pane == "logs":
             self.refresh_logs()
         elif self._pane == "leases":
@@ -857,6 +1060,8 @@ class OpenWrtTUI(App):
         elif self._pane == "network":
             self.refresh_routes()
             self.refresh_rules()
+        elif self._pane == "passwall2":
+            self._pw2_reload()
 
     def _set_filter_hint(self) -> None:
         hints = {
@@ -870,6 +1075,7 @@ class OpenWrtTUI(App):
             "process": t("filter.process"),
             "logs": t("filter.logs"),
             "overview": t("msg.filter_overview"),
+            "passwall2": t("filter.passwall2"),
         }
         self.query_one("#filter-input", Input).placeholder = hints.get(self._pane, t("action.filter"))
         self._update_filter_count()
@@ -895,6 +1101,26 @@ class OpenWrtTUI(App):
             if data:
                 self._proc_detail_pid = pid
                 self._paint_proc_detail(data)
+            return
+        if event.data_table.id == "pw2-node-table":
+            nid = self._selected_pw2_id("pw2-node-table")
+            self._pw2_focus_node = nid
+            self._paint_pw2_node_detail(nid)
+            return
+        if event.data_table.id == "pw2-acl-table":
+            aid = self._selected_pw2_id("pw2-acl-table")
+            self._pw2_focus_acl = aid
+            self._paint_pw2_acl_detail(aid)
+            return
+        if event.data_table.id == "pw2-sub-table":
+            sid = self._selected_pw2_id("pw2-sub-table")
+            self._pw2_focus_sub = sid
+            self._paint_pw2_sub_detail(sid)
+            return
+        if event.data_table.id == "pw2-rule-table":
+            rid = self._selected_pw2_id("pw2-rule-table")
+            self._pw2_focus_rule = rid
+            self._paint_pw2_rule_detail(rid)
             return
         if event.data_table.id != "svc-table" or self._pane != "services":
             return
@@ -995,18 +1221,9 @@ class OpenWrtTUI(App):
     def _paint_proc_detail(self, data: dict) -> None:
         self.query_one("#proc-detail", Static).update(format_proc_detail(data))
 
+    @work
     async def action_svc_action(self, action: str) -> None:
-        if self._pane != "services":
-            return
-        name = self._selected_service() or self._svc_focus
-        if not name:
-            self.notify(t("msg.pick_service"), severity="warning")
-            return
-        label = _svc_action_label(action)
-        ok = await self.push_screen_wait(ConfirmModal(t("confirm.svc", name=name, action=label)))
-        if not ok:
-            return
-        self._run_svc_action(name, action)
+        await self._svc_confirm_action(action)
 
     @work(thread=True, exclusive=True, group="svc-show")
     def _load_svc_show(self, name: str) -> None:
@@ -1362,10 +1579,12 @@ class OpenWrtTUI(App):
         else:
             table.add_columns(t("col.ip"), t("col.mac"), t("col.interface"), t("col.vendor"), t("col.connections"), t("col.received"), t("col.sent"), t("col.inbound"), t("col.outbound"))
         self._set_filter_hint()
+        self._update_footer_edit()
 
     def _apply_neighbors(self, payload: dict, sampled_at: float) -> None:
         rows = list(payload.get("neighbors") or [])
         self._neigh_by_ip = {str(n.get("ip") or ""): n for n in rows if n.get("ip")}
+        self._neigh_by_mac = {norm_mac(n.get("mac")): n for n in rows if n.get("mac")}
         if payload.get("source") == "bandix":
             self._ensure_lease_cols("bandix")
             self._lease_rows = [_bandix_neighbor_row(n) for n in rows]
@@ -1446,6 +1665,12 @@ class OpenWrtTUI(App):
         elif table_id == "lease-table":
             keep, keep_col = self._lease_cursor_ip, 0
             self._bandix_ignore_highlight = True
+        elif table_id == "pw2-node-table":
+            keep, keep_col = self._pw2_focus_node, 0
+        elif table_id == "pw2-acl-table":
+            keep, keep_col = self._pw2_focus_acl, 0
+        elif table_id == "pw2-sub-table":
+            keep, keep_col = self._pw2_focus_sub, 0
         table.clear()
         shown = 0
         keep_row = 0
@@ -1458,7 +1683,7 @@ class OpenWrtTUI(App):
             shown += 1
         self._counts[table_id] = (shown, len(rows))
         self._update_filter_count()
-        if table_id in {"svc-table", "proc-table", "lease-table"} and shown:
+        if table_id in {"svc-table", "proc-table", "lease-table", "pw2-node-table", "pw2-acl-table", "pw2-sub-table", "pw2-rule-table"} and shown:
             table.move_cursor(row=keep_row)
         if table_id == "lease-table":
             self.call_after_refresh(self._resume_bandix_highlight)
@@ -1470,6 +1695,11 @@ class OpenWrtTUI(App):
         self._paint_table("proc-table", self._proc_rows)
         self._paint_table("route-table", self._route_rows)
         self._paint_table("rule-table", self._rule_rows)
+        if self._pw2:
+            self._paint_table("pw2-node-table", self._pw2_node_rows)
+            self._paint_table("pw2-sub-table", self._pw2_sub_rows)
+            self._paint_table("pw2-rule-table", self._pw2_rule_rows)
+            self._paint_table("pw2-acl-table", self._pw2_acl_rows)
 
     def _active_pane(self) -> str:
         return self._pane or "overview"
@@ -1492,6 +1722,17 @@ class OpenWrtTUI(App):
             nr, tr = self._counts.get("route-table", (0, 0))
             nu, tu = self._counts.get("rule-table", (0, 0))
             label = f"{ni}/{ti} · {nr}/{tr} · {nu}/{tu}"
+        elif pane == "passwall2":
+            sub_map = {
+                "pw2-nodes": "pw2-node-table",
+                "pw2-subscribe": "pw2-sub-table",
+                "pw2-rules": "pw2-rule-table",
+                "pw2-acl": "pw2-acl-table",
+            }
+            tid = sub_map.get(self._pw2_sub)
+            if tid:
+                shown, total = self._counts.get(tid, (0, 0))
+                label = f"{shown}/{total}"
         elif pane in mapping:
             shown, total = self._counts.get(mapping[pane], (0, 0))
             label = f"{shown}/{total}"
@@ -1552,6 +1793,429 @@ class OpenWrtTUI(App):
             return
         self._log_ready = True
         self.query_one("#log-view", RichLog).write(Text(t("msg.logs_fail", message=message), style="bold #ed5c5c"))
+
+    def _selected_pw2_id(self, table_id: str) -> str:
+        table = self.query_one(f"#{table_id}", DataTable)
+        if table.row_count == 0:
+            return ""
+        try:
+            row = table.get_row_at(table.cursor_row)
+        except Exception:
+            return ""
+        return _plain(row[0]).strip() if row else ""
+
+    def _pw2_reload(self) -> None:
+        if not self._pw2:
+            return
+        sub = self._pw2_sub
+        if sub == "pw2-nodes":
+            self._load_pw2_nodes()
+        elif sub == "pw2-subscribe":
+            self._load_pw2_subscribe()
+        elif sub == "pw2-settings-tab":
+            self._load_pw2_settings()
+        elif sub == "pw2-rules":
+            self._load_pw2_rules()
+        elif sub == "pw2-acl":
+            self._load_pw2_acl()
+        elif sub == "pw2-logs":
+            self._load_pw2_logs()
+
+    def action_pw2_prev_sub(self) -> None:
+        if self._pane != "passwall2" or not self._pw2:
+            return
+        idx = PW2_SUBS.index(self._pw2_sub) if self._pw2_sub in PW2_SUBS else 0
+        self.query_one("#pw2-tabs", TabbedContent).active = PW2_SUBS[(idx - 1) % len(PW2_SUBS)]
+
+    def action_pw2_next_sub(self) -> None:
+        if self._pane != "passwall2" or not self._pw2:
+            return
+        idx = PW2_SUBS.index(self._pw2_sub) if self._pw2_sub in PW2_SUBS else 0
+        self.query_one("#pw2-tabs", TabbedContent).active = PW2_SUBS[(idx + 1) % len(PW2_SUBS)]
+
+    def action_pw2_ping(self, mode: str) -> None:
+        if self._pane != "passwall2" or self._pw2_sub != "pw2-nodes":
+            return
+        nid = self._selected_pw2_id("pw2-node-table") or self._pw2_focus_node
+        if not nid:
+            self.notify(t("msg.pw2_pick"), severity="warning")
+            return
+        self._pw2_ping_one(nid, "tcping" if mode == "tcp" else "icmp")
+
+    def _on_pw2_nodes(self) -> bool:
+        if self._pane != "passwall2" or not self._pw2 or self._pw2_sub != "pw2-nodes":
+            return False
+        return not self._typing_filter()
+
+    def _on_pw2_acl(self) -> bool:
+        if self._pane != "passwall2" or not self._pw2 or self._pw2_sub != "pw2-acl":
+            return False
+        return not self._typing_filter()
+
+    @work
+    async def action_pw2_node_add(self) -> None:
+        if self._on_pw2_acl():
+            await self._pw2_acl_form()
+            return
+        if not self._on_pw2_nodes():
+            return
+        await self._pw2_node_form()
+
+    @work
+    async def action_edit_or_enable(self) -> None:
+        if self._on_bandix_neighbors():
+            await self._rename_neighbor()
+            return
+        if self._on_pw2_nodes():
+            await self._pw2_node_form(self._selected_pw2_id("pw2-node-table") or self._pw2_focus_node)
+            return
+        if self._on_pw2_acl():
+            await self._pw2_acl_form(self._selected_pw2_id("pw2-acl-table") or self._pw2_focus_acl)
+            return
+        await self._svc_confirm_action("enable")
+
+    async def _svc_confirm_action(self, action: str) -> None:
+        if self._pane != "services":
+            return
+        name = self._selected_service() or self._svc_focus
+        if not name:
+            self.notify(t("msg.pick_service"), severity="warning")
+            return
+        label = _svc_action_label(action)
+        ok = await self.push_screen_wait(ConfirmModal(t("confirm.svc", name=name, action=label)))
+        if ok:
+            self._run_svc_action(name, action)
+
+    async def _pw2_node_form(self, node_id: str = "") -> None:
+        node = self._pw2_node_by_id.get(node_id) if node_id else None
+        if node_id and not node:
+            self.notify(t("msg.pw2_pick_node"), severity="warning")
+            return
+        ok = await self.push_screen_wait(NodeFormModal(self.device, node))
+        if not ok:
+            return
+        self._pw2_reload()
+        await self._pw2_ask_apply()
+
+    async def _pw2_acl_form(self, acl_id: str = "") -> None:
+        acl = self._pw2_acl_by_id.get(acl_id) if acl_id else None
+        if acl_id and not acl:
+            self.notify(t("msg.pw2_pick_acl"), severity="warning")
+            return
+        nodes = self._pw2_nodes
+        if not nodes:
+            from openwrt_cli.services.passwall2 import PassWall2Service
+
+            try:
+                listed = PassWall2Service(self.device).nodes(measure=False)
+                nodes = list((listed.data or {}).get("nodes") or [])
+                self._pw2_nodes = nodes
+                self._pw2_node_by_id = {str(n.get("id")): n for n in nodes if n.get("id")}
+            except Exception:
+                nodes = []
+        ok = await self.push_screen_wait(AclFormModal(self.device, acl, nodes))
+        if not ok:
+            return
+        self._pw2_reload()
+        await self._pw2_ask_apply()
+
+    @work
+    async def action_pw2_node_delete(self) -> None:
+        if self._on_pw2_acl():
+            await self._pw2_acl_delete()
+            return
+        if not self._on_pw2_nodes():
+            return
+        nid = self._selected_pw2_id("pw2-node-table") or self._pw2_focus_node
+        node = self._pw2_node_by_id.get(nid)
+        if not node:
+            self.notify(t("msg.pw2_pick_node"), severity="warning")
+            return
+        ok = await self.push_screen_wait(
+            ConfirmModal(t("confirm.pw2_node_delete_tui", name=node.get("remarks") or nid, id=nid))
+        )
+        if not ok:
+            return
+        self._pw2_delete_node(nid, node.get("remarks") or nid, force=False)
+
+    async def _pw2_acl_delete(self) -> None:
+        aid = self._selected_pw2_id("pw2-acl-table") or self._pw2_focus_acl
+        item = self._pw2_acl_by_id.get(aid)
+        if not item:
+            self.notify(t("msg.pw2_pick_acl"), severity="warning")
+            return
+        ok = await self.push_screen_wait(
+            ConfirmModal(t("confirm.pw2_acl_delete_tui", name=item.get("remarks") or aid, id=aid))
+        )
+        if not ok:
+            return
+        self._pw2_delete_acl(aid)
+
+    async def _pw2_ask_apply(self) -> None:
+        ok = await self.push_screen_wait(ConfirmModal(t("confirm.pw2_apply")))
+        if ok:
+            self._pw2_apply()
+
+    @work
+    async def _pw2_ask_apply_work(self) -> None:
+        await self._pw2_ask_apply()
+
+    @work(thread=True, exclusive=True, group="pw2-write")
+    def _pw2_apply(self) -> None:
+        from openwrt_cli.services.service import ServiceService
+
+        try:
+            result = ServiceService(self.device).action("passwall2", "restart")
+            message = result.message or t("msg.pw2_node_saved")
+            severity = "information" if result.ok else "error"
+        except Exception as e:
+            message = str(e)
+            severity = "error"
+        self.call_from_thread(self.notify, message, severity=severity)
+        self.call_from_thread(self._pw2_reload)
+
+    @work(thread=True, exclusive=True, group="pw2-write")
+    def _pw2_delete_acl(self, acl_id: str) -> None:
+        from openwrt_cli.services.passwall2 import PassWall2Service
+
+        try:
+            result = PassWall2Service(self.device).acl_delete(acl_id)
+        except Exception as e:
+            self.call_from_thread(self.notify, str(e), severity="error")
+            return
+        if not result.ok:
+            self.call_from_thread(self.notify, result.message or t("err.pw2_acl_invalid", error=""), severity="error")
+            return
+        self.call_from_thread(self.notify, result.message or t("msg.pw2_acl_deleted"))
+        self.call_from_thread(self._pw2_reload)
+        self.call_from_thread(self._pw2_ask_apply_later)
+
+    @work(thread=True, exclusive=True, group="pw2-write")
+    def _pw2_delete_node(self, node_id: str, remarks: str, force: bool) -> None:
+        from openwrt_cli.services.passwall2 import PassWall2Service
+
+        try:
+            result = PassWall2Service(self.device).node_delete(node_id, force=force)
+        except Exception as e:
+            self.call_from_thread(self.notify, str(e), severity="error")
+            return
+        data = result.data or {}
+        if not result.ok and data.get("error") == "pw2_node_in_use" and not force:
+            refs = ", ".join(data.get("refs") or [])
+            self.call_from_thread(self._pw2_confirm_force_delete, node_id, remarks, refs)
+            return
+        if not result.ok:
+            self.call_from_thread(self.notify, result.message or t("err.pw2_node_invalid", error=""), severity="error")
+            return
+        self.call_from_thread(self.notify, result.message or t("msg.pw2_node_deleted"))
+        self.call_from_thread(self._pw2_reload)
+        self.call_from_thread(self._pw2_ask_apply_later)
+
+    def _pw2_confirm_force_delete(self, node_id: str, remarks: str, refs: str) -> None:
+        self._pw2_ask_force_delete(node_id, remarks, refs)
+
+    def _pw2_ask_apply_later(self) -> None:
+        self._pw2_ask_apply_work()
+
+    @work
+    async def _pw2_ask_force_delete(self, node_id: str, remarks: str, refs: str) -> None:
+        ok = await self.push_screen_wait(
+            ConfirmModal(t("confirm.pw2_node_in_use", name=remarks, refs=refs))
+        )
+        if ok:
+            self._pw2_delete_node(node_id, remarks, force=True)
+
+    def action_pw2_acl_log(self) -> None:
+        if self._pane != "passwall2" or self._pw2_sub != "pw2-acl":
+            return
+        aid = self._selected_pw2_id("pw2-acl-table") or self._pw2_focus_acl
+        if not aid:
+            self.notify(t("msg.pw2_pick"), severity="warning")
+            return
+        item = self._pw2_acl_by_id.get(aid) or {}
+        from openwrt_cli.services.passwall2 import acl_log_path
+
+        self.push_screen(AclLogModal(
+            self.device,
+            aid,
+            str(item.get("remarks") or aid),
+            str(item.get("log_file") or acl_log_path(aid)),
+        ))
+
+    def _paint_pw2_node_detail(self, nid: str) -> None:
+        self.query_one("#pw2-node-detail", Static).update(format_node_detail(self._pw2_node_by_id.get(nid)))
+
+    def _paint_pw2_acl_detail(self, aid: str) -> None:
+        self.query_one("#pw2-acl-detail", Static).update(format_acl_detail(self._pw2_acl_by_id.get(aid)))
+
+    def _paint_pw2_sub_detail(self, sid: str) -> None:
+        self.query_one("#pw2-sub-detail", Static).update(format_subscribe_detail(self._pw2_sub_by_id.get(sid)))
+
+    def _paint_pw2_rule_detail(self, rid: str) -> None:
+        self.query_one("#pw2-rule-detail", Static).update(format_rule_detail(self._pw2_rule_by_id.get(rid)))
+
+    @work(thread=True, exclusive=True, group="pw2")
+    def _load_pw2_nodes(self) -> None:
+        from openwrt_cli.services.passwall2 import PassWall2Service, can_measure
+
+        try:
+            svc = PassWall2Service(self.device)
+            result = svc.nodes(measure=False)
+            data = result.data or {}
+            rows = list(data.get("nodes") or [])
+            mode = data.get("detection") or "off"
+        except Exception as e:
+            self.call_from_thread(self._toast, str(e), "error")
+            return
+        self.call_from_thread(self._apply_pw2_nodes, rows, mode)
+        for node in rows:
+            if not can_measure(node):
+                continue
+            nid = node.get("id") or ""
+            for key, ping_mode in (("ping", "icmp"), ("tcping", "tcping")):
+                try:
+                    latency = svc.ping_address(node.get("address") or "", node.get("port"), ping_mode)
+                except Exception:
+                    latency = "—"
+                self.call_from_thread(self._apply_pw2_latency, nid, key, latency)
+
+    def _apply_pw2_nodes(self, rows: list[dict], mode: str) -> None:
+        self._pw2_detection = mode
+        self._pw2_nodes = rows
+        self._pw2_node_by_id = {str(n.get("id")): n for n in rows if n.get("id")}
+        self._pw2_node_rows = [node_row(n) for n in rows]
+        self._paint_table("pw2-node-table", self._pw2_node_rows)
+        nid = self._pw2_focus_node or (rows[0].get("id") if rows else "")
+        if nid:
+            self._pw2_focus_node = str(nid)
+            self._paint_pw2_node_detail(str(nid))
+
+    def _apply_pw2_latency(self, nid: str, key: str, latency: str) -> None:
+        node = self._pw2_node_by_id.get(nid)
+        if not node:
+            return
+        node[key] = latency
+        self._pw2_node_rows = [node_row(n) for n in self._pw2_nodes]
+        self._paint_table("pw2-node-table", self._pw2_node_rows)
+        if nid == self._pw2_focus_node:
+            self._paint_pw2_node_detail(nid)
+
+    @work(thread=True, exclusive=True, group="pw2-one")
+    def _pw2_ping_one(self, nid: str, mode: str) -> None:
+        from openwrt_cli.services.passwall2 import PassWall2Service
+
+        try:
+            result = PassWall2Service(self.device).node_ping(nid, mode=mode)
+            latency = (result.data or {}).get("latency") or "—"
+        except Exception as e:
+            self.call_from_thread(self._toast, str(e), "error")
+            return
+        key = "tcping" if mode == "tcping" else "ping"
+        self.call_from_thread(self._apply_pw2_latency, nid, key, latency)
+
+    @work(thread=True, exclusive=True, group="pw2")
+    def _load_pw2_subscribe(self) -> None:
+        from openwrt_cli.services.passwall2 import PassWall2Service
+
+        try:
+            data = PassWall2Service(self.device).subscribe().data or {}
+        except Exception as e:
+            self.call_from_thread(self._toast, str(e), "error")
+            return
+        self.call_from_thread(self._apply_pw2_subscribe, data.get("subscribe") or [])
+
+    def _apply_pw2_subscribe(self, rows: list[dict]) -> None:
+        self._pw2_sub_by_id = {str(s.get("id")): s for s in rows if s.get("id")}
+        self._pw2_sub_rows = [subscribe_row(s) for s in rows]
+        self._paint_table("pw2-sub-table", self._pw2_sub_rows)
+        sid = self._pw2_focus_sub or (rows[0].get("id") if rows else "")
+        if sid:
+            self._pw2_focus_sub = str(sid)
+            self._paint_pw2_sub_detail(str(sid))
+
+    @work(thread=True, exclusive=True, group="pw2")
+    def _load_pw2_settings(self) -> None:
+        from openwrt_cli.services.passwall2 import PassWall2Service
+
+        try:
+            data = PassWall2Service(self.device).settings().data or {}
+        except Exception as e:
+            self.call_from_thread(self._toast, str(e), "error")
+            return
+        self.call_from_thread(self._apply_pw2_settings, data)
+
+    def _apply_pw2_settings(self, data: dict) -> None:
+        self.query_one("#pw2-settings", Static).update(format_settings(data))
+
+    @work(thread=True, exclusive=True, group="pw2")
+    def _load_pw2_rules(self) -> None:
+        from openwrt_cli.services.passwall2 import PassWall2Service
+
+        try:
+            data = PassWall2Service(self.device).rules().data or {}
+        except Exception as e:
+            self.call_from_thread(self._toast, str(e), "error")
+            return
+        self.call_from_thread(self._apply_pw2_rules, data)
+
+    def _apply_pw2_rules(self, data: dict) -> None:
+        self.query_one("#pw2-rules-geo", Static).update(format_rules_geo(data.get("global_rules") or {}))
+        rows = list(data.get("shunt_rules") or [])
+        self._pw2_rule_by_id = {str(r.get("id")): r for r in rows if r.get("id")}
+        self._pw2_rule_rows = [shunt_row(r) for r in rows]
+        self._paint_table("pw2-rule-table", self._pw2_rule_rows)
+        rid = self._pw2_focus_rule or (rows[0].get("id") if rows else "")
+        if rid:
+            self._pw2_focus_rule = str(rid)
+            self._paint_pw2_rule_detail(str(rid))
+
+    @work(thread=True, exclusive=True, group="pw2")
+    def _load_pw2_acl(self) -> None:
+        from openwrt_cli.services.passwall2 import PassWall2Service
+
+        try:
+            data = PassWall2Service(self.device).acl().data or {}
+        except Exception as e:
+            self.call_from_thread(self._toast, str(e), "error")
+            return
+        self.call_from_thread(self._apply_pw2_acl, data.get("acl") or [])
+
+    def _apply_pw2_acl(self, rows: list[dict]) -> None:
+        self._pw2_acl_by_id = {str(a.get("id")): a for a in rows if a.get("id")}
+        self._pw2_acl_rows = [acl_row(a) for a in rows]
+        self._paint_table("pw2-acl-table", self._pw2_acl_rows)
+        aid = self._pw2_focus_acl or (rows[0].get("id") if rows else "")
+        if aid:
+            self._pw2_focus_acl = str(aid)
+            self._paint_pw2_acl_detail(str(aid))
+
+    @work(thread=True, exclusive=True, group="pw2")
+    def _load_pw2_logs(self) -> None:
+        from openwrt_cli.services.passwall2 import PassWall2Service
+
+        try:
+            data = PassWall2Service(self.device).logs(tail=200).data or {}
+            from openwrt_cli.services.passwall2 import log_messages
+
+            lines = log_messages(data.get("entries"))
+        except Exception as e:
+            self.call_from_thread(self._apply_pw2_log_error, str(e))
+            return
+        self.call_from_thread(self._apply_pw2_logs, lines)
+
+    def _apply_pw2_logs(self, lines: list[str]) -> None:
+        view = self.query_one("#pw2-log", RichLog)
+        view.clear()
+        q = self._filter.lower()
+        for line in lines:
+            if q and q not in line.lower():
+                continue
+            view.write(line)
+
+    def _apply_pw2_log_error(self, message: str) -> None:
+        view = self.query_one("#pw2-log", RichLog)
+        view.clear()
+        view.write(Text(message, style="bold #ed5c5c"))
 
     def on_unmount(self) -> None:
         self.device.close()

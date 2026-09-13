@@ -765,6 +765,20 @@ class NetworkService:
             warnings=warnings,
         )
 
+    def set_neighbor_hostname(self, mac: str, hostname: str) -> CommandResult:
+        from openwrt_cli.services.bandix import BandixService
+
+        try:
+            data = BandixService(self.device).set_hostname(mac, hostname)
+        except DeviceCommandError as e:
+            return CommandResult.fail(str(e), transport=self.device.transport)
+        return CommandResult.ok_data(
+            data,
+            transport=self.device.transport,
+            kind="neigh_hostname",
+            message=t("msg.neigh_renamed", name=data.get("hostname") or "—"),
+        )
+
     def _neighbors_from_arp_file(self) -> list[dict[str, Any]]:
         raw = ""
         try:

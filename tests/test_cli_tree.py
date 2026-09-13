@@ -8,7 +8,7 @@ from openwrt_cli.version import package_version
 runner = CliRunner()
 
 _GROUPS = (
-    "network", "firewall", "qos", "service", "user", "backup",
+    "network", "firewall", "qos", "service", "passwall2", "user", "backup",
     "system", "config", "doctor",
 )
 _TOP = ("setup", "tui", "wizard", "logs")
@@ -27,7 +27,7 @@ def test_help_lists_current_groups():
 def test_network_help_has_routes_rules_metrics():
     result = runner.invoke(app, ["network", "--help"])
     assert result.exit_code == 0
-    for name in ("interfaces", "routes", "rules", "neighbors", "metrics", "leases"):
+    for name in ("interfaces", "routes", "rules", "neighbors", "set-hostname", "metrics", "leases"):
         assert name in result.stdout
 
 
@@ -50,6 +50,44 @@ def test_version_flags():
     assert js.exit_code == 0
     assert '"version"' in js.stdout
     assert package_version() in js.stdout
+
+
+def test_passwall2_help_is_readonly():
+    result = runner.invoke(app, ["passwall2", "--help"])
+    assert result.exit_code == 0
+    for name in ("status", "nodes", "subscribe", "settings", "rules", "components", "acl", "logs"):
+        assert name in result.stdout
+    assert "clear" not in result.stdout
+    assert "subscribe_manual" not in result.stdout
+    node = runner.invoke(app, ["passwall2", "node", "--help"])
+    assert node.exit_code == 0
+    for name in ("add", "set", "delete"):
+        assert name in node.stdout
+    add = runner.invoke(app, ["passwall2", "node", "add", "--help"])
+    assert add.exit_code == 0
+    for flag in ("--from-url", "--type", "--protocol", "--remarks", "--group", "--address", "--port", "--username", "--password"):
+        assert flag in add.stdout
+    patch = runner.invoke(app, ["passwall2", "node", "set", "--help"])
+    assert patch.exit_code == 0
+    for flag in ("--remarks", "--group", "--type", "--address", "--username", "--unset"):
+        assert flag in patch.stdout
+    logs = runner.invoke(app, ["passwall2", "logs", "--help"])
+    assert logs.exit_code == 0
+    assert "--since" in logs.stdout
+    assert "--until" in logs.stdout
+    assert "--tail" in logs.stdout
+    acl_log = runner.invoke(app, ["passwall2", "acl", "log", "--help"])
+    assert acl_log.exit_code == 0
+    assert "--since" in acl_log.stdout
+    assert "--until" in acl_log.stdout
+    acl = runner.invoke(app, ["passwall2", "acl", "--help"])
+    assert acl.exit_code == 0
+    for name in ("add", "set", "delete", "source", "show", "log"):
+        assert name in acl.stdout
+    src = runner.invoke(app, ["passwall2", "acl", "source", "--help"])
+    assert src.exit_code == 0
+    assert "add" in src.stdout
+    assert "remove" in src.stdout
 
 
 def test_config_no_args_is_help():

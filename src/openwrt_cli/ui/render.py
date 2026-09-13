@@ -135,6 +135,8 @@ def _to_payload(result: CommandResult) -> dict[str, Any]:
         payload.update(result.data)
     elif result.data is not None:
         payload["data"] = result.data
+    if result.kind:
+        payload["kind"] = result.kind
     return payload
 
 
@@ -342,6 +344,218 @@ def _render_text(console: Console, result: CommandResult) -> None:
             [w.get("section", ""), w.get("device", ""), w.get("ssid", ""), w.get("network", ""), str(w.get("disabled", ""))]
             for w in data.get("wifi") or []
         ], empty=t("empty.wifi"))
+        return
+    if kind == "pw2_status" and isinstance(data, dict):
+        _table(console, [t("col.item"), t("col.value")], [
+            [t("pw2.installed"), t("label.yes") if data.get("installed") else t("label.no")],
+            [t("col.running"), t("label.yes") if data.get("running") else t("label.no")],
+            [t("col.node"), data.get("node_remarks") or data.get("node") or "—"],
+            [t("pw2.acl_enable"), t("label.yes") if data.get("acl_enable") else t("label.no")],
+            [t("pw2.detection"), data.get("detection") or "—"],
+        ])
+        return
+    if kind == "pw2_nodes" and isinstance(data, dict):
+        _table(console, [
+            t("col.section"), t("col.remarks"), t("col.group"), t("col.type"),
+            t("col.protocol"), t("col.address"), t("col.port"),
+            t("col.ping"), t("col.tcping"),
+        ], [
+            [
+                n.get("id") or "",
+                n.get("remarks") or "—",
+                n.get("group") or "—",
+                n.get("type") or "—",
+                n.get("protocol") or "—",
+                n.get("address") or "—",
+                n.get("port") or "—",
+                n.get("ping") or "—",
+                n.get("tcping") or "—",
+            ]
+            for n in data.get("nodes") or []
+        ], empty=t("empty.pw2_nodes"))
+        return
+    if kind == "pw2_subscribe" and isinstance(data, dict):
+        _table(console, [t("col.section"), t("col.remarks"), t("col.nodes"), t("col.url")], [
+            [s.get("id") or "", s.get("remarks") or "—", s.get("node_count") if s.get("node_count") is not None else "—", s.get("url") or "—"]
+            for s in data.get("subscribe") or []
+        ], empty=t("empty.pw2_subscribe"))
+        filt = data.get("filter") or {}
+        if filt:
+            console.print()
+            _dict_lines(console, {"filter": filt})
+        return
+    if kind == "pw2_rules" and isinstance(data, dict):
+        from openwrt_cli.services.passwall2 import format_uci_value, parse_geo_rules, uci_label
+
+        geo = parse_geo_rules(data.get("global_rules") or {})
+        if geo:
+            _table(console, [t("col.item"), t("col.value")], [
+                [uci_label(k), format_uci_value(k, v).replace("\n", " ")]
+                for k, v in geo
+            ])
+            console.print()
+        _table(console, [
+            t("col.section"), t("col.remarks"), t("col.network"),
+            t("col.domains"), t("col.ips"),
+        ], [
+            [
+                r.get("id") or "",
+                r.get("remarks") or "—",
+                r.get("network") or "—",
+                r.get("domain_count") if r.get("domain_count") is not None else 0,
+                r.get("ip_count") if r.get("ip_count") is not None else 0,
+            ]
+            for r in data.get("shunt_rules") or []
+        ], empty=t("empty.pw2_rules"))
+        return
+    if kind == "pw2_components" and isinstance(data, dict):
+        _table(console, [t("col.component"), t("col.path"), t("col.local"), t("col.remote")], [
+            [
+                c.get("title") or c.get("name") or "—",
+                c.get("path") or "—",
+                c.get("version") or "—",
+                c.get("remote") or "—",
+            ]
+            for c in data.get("components") or []
+        ], empty=t("empty.none"))
+        return
+    if kind == "pw2_acl" and isinstance(data, dict):
+        from openwrt_cli.services.passwall2 import summarize_list
+
+        _table(console, [
+            t("col.section"), t("col.enabled"), t("col.remarks"), t("col.sources"), t("col.node"),
+        ], [
+            [
+                a.get("id") or "",
+                t("label.yes") if a.get("enabled") else t("label.no"),
+                a.get("remarks") or "—",
+                summarize_list(a.get("sources")),
+                a.get("node_remarks") or a.get("node") or "—",
+            ]
+            for a in data.get("acl") or []
+        ], empty=t("empty.pw2_acl"))
+        return
+    if kind == "pw2_logs" and isinstance(data, dict):
+        from openwrt_cli.services.passwall2 import log_messages
+
+        lines = log_messages(data.get("entries"))
+        if not lines:
+            console.print(f"[muted]{t('empty.pw2_logs')}[/muted]")
+            return
+        for line in lines:
+            console.print(line)
+        return
+    if kind == "pw2_acl_log" and isinstance(data, dict):
+        from openwrt_cli.services.passwall2 import log_messages
+
+        if not data.get("enabled"):
+            if result.message:
+                console.print(f"[warning]⚠ {result.message}[/warning]")
+            return
+        lines = log_messages(data.get("entries") or data.get("lines"))
+        if not lines:
+            console.print(f"[muted]{t('empty.pw2_logs')}[/muted]")
+            return
+        for line in lines:
+            console.print(line)
+        return
+    if kind == "pw2_acl_rule" and isinstance(data, dict) and data.get("acl"):
+        from openwrt_cli.services.passwall2 import format_uci_value, uci_label
+
+        row = data.get("acl") or {}
+        keys = (
+            "id", "enabled", "sources", "node", "node_remarks",
+            "tcp_no_redir_ports", "udp_no_redir_ports", "tcp_redir_ports", "udp_redir_ports",
+            "dns_mode", "remote_dns", "log", "loglevel", "log_file",
+        )
+        _table(console, [t("col.item"), t("col.value")], [
+            [uci_label(key), format_uci_value(key, row.get(key))]
+            for key in keys
+        ])
+        return
+    if kind == "pw2_acl_rule" and isinstance(data, dict):
+        rows = [
+            [t("pw2.opt.id"), data.get("id") or "—"],
+            [t("pw2.opt.remarks"), data.get("remarks") or "—"],
+            [t("pw2.acl.applied"), t("label.yes") if data.get("applied") else t("label.no")],
+        ]
+        if data.get("deleted"):
+            rows.append([t("pw2.acl.deleted"), t("label.yes")])
+        _table(console, [t("col.item"), t("col.value")], rows)
+        return
+    if kind == "pw2_acl_source" and isinstance(data, dict):
+        from openwrt_cli.services.passwall2 import format_uci_value, uci_label
+
+        change = data.get("added") if "added" in data else data.get("removed")
+        change_key = "pw2.acl.added" if "added" in data else "pw2.acl.removed"
+        _table(console, [t("col.item"), t("col.value")], [
+            [t("pw2.opt.id"), data.get("id") or "—"],
+            [uci_label("sources"), format_uci_value("sources", data.get("sources"))],
+            [t(change_key), format_uci_value("sources", change or [])],
+            [t("pw2.acl.applied"), t("label.yes") if data.get("applied") else t("label.no")],
+        ])
+        return
+    if kind == "pw2_node" and isinstance(data, dict) and data.get("node"):
+        from openwrt_cli.services.passwall2 import format_uci_value, uci_label
+
+        row = data.get("node") or {}
+        keys = ("id", "remarks", "group", "type", "protocol", "address", "port")
+        extra = [
+            (k, v) for k, v in (row.get("options") or {}).items()
+            if k not in {"remarks", "group", "type", "protocol", "address", "port", "add_from"}
+        ]
+        _table(console, [t("col.item"), t("col.value")], [
+            [uci_label(key), format_uci_value(key, row.get(key))]
+            for key in keys
+        ] + [[uci_label(k), format_uci_value(k, v)] for k, v in extra])
+        return
+    if kind == "pw2_node" and isinstance(data, dict) and not data.get("node"):
+        _table(console, [t("col.item"), t("col.value")], [
+            [t("pw2.opt.id"), data.get("id") or "—"],
+            [t("pw2.opt.remarks"), data.get("remarks") or "—"],
+            [t("pw2.opt.type"), data.get("type") or "—"],
+            [t("pw2.opt.protocol"), data.get("protocol") or "—"],
+            [t("pw2.node.applied"), t("label.yes") if data.get("applied") else t("label.no")],
+        ])
+        return
+    if kind == "pw2_ping" and isinstance(data, dict):
+        latency = data.get("latency") or "—"
+        console.print(f"{data.get('remarks') or data.get('id') or ''}  {data.get('mode') or ''}  {latency}".strip())
+        return
+    if kind == "pw2_settings" and isinstance(data, dict):
+        from openwrt_cli.services.passwall2 import format_uci_value, uci_label
+
+        rows: list[list[str]] = []
+        for block in (
+            "global_delay", "global_forwarding", "global_other",
+            "global_haproxy", "global_xray", "global_singbox",
+        ):
+            fields = data.get(block) or {}
+            if not fields:
+                continue
+            rows.append([uci_label(block, section=True), ""])
+            for key, value in fields.items():
+                rows.append([f"  {uci_label(key)}", format_uci_value(key, value).replace("\n", " ")])
+        extra = data.get("extra") or {}
+        if extra:
+            rows.append([uci_label("extra", section=True), ""])
+            for name, sec in extra.items():
+                rows.append([f"  {name}", ""])
+                if not isinstance(sec, dict):
+                    continue
+                for key, value in sec.items():
+                    if key == "type":
+                        continue
+                    rows.append([f"    {uci_label(key)}", format_uci_value(key, value).replace("\n", " ")])
+        comps = data.get("components") or []
+        if comps:
+            rows.append([uci_label("components", section=True), ""])
+            for c in comps:
+                title = c.get("title") or c.get("name") or "—"
+                path = c.get("path") or "—"
+                ver = c.get("version") or "—"
+                rows.append([f"  {title}", f"{path}  {ver}".strip()])
+        _table(console, [t("col.item"), t("col.value")], rows)
         return
 
     if result.message:

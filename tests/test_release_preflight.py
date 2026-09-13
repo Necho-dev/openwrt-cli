@@ -17,15 +17,21 @@ def _load():
     return module
 
 
-def test_repo_changelogs_align_with_pyproject():
+def test_repo_changelogs_align_with_pyproject(monkeypatch):
+    # Branch pushes set GITHUB_REF_NAME=main; the zh URL then has no version.
+    monkeypatch.delenv("GITHUB_REF_NAME", raising=False)
+    monkeypatch.setenv("GITHUB_REF_NAME", "main")
     mod = _load()
     version = mod.pyproject_version()
     mod.require_changelog_alignment(version)
     assert version in (_ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
     assert version in (_ROOT / "CHANGELOG.zh.md").read_text(encoding="utf-8")
     notes = mod.release_notes(version)
+    body = mod.changelog_notes(version).strip()
+    assert body
+    assert notes.startswith(body.splitlines()[0])
     assert "CHANGELOG.zh.md" in notes
-    assert notes.strip().startswith("First public release") or version in notes
+    assert "/blob/main/CHANGELOG.zh.md" in notes
 
 
 def test_tag_must_match_pyproject(monkeypatch):

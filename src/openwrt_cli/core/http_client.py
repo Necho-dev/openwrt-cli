@@ -9,7 +9,8 @@ import socket
 import ssl
 import threading
 import time
-from typing import Any, Literal
+from contextlib import contextmanager
+from typing import Any, Iterator, Literal
 from urllib.parse import urlencode
 
 from openwrt_cli.core.channels.uci import encode_uci_values, option_from_values, resolve_section, section_id_from_add
@@ -107,11 +108,19 @@ class _HTTPUci:
             return
         shown = self.show(config)
         section = resolve_section(shown, section)
-        self._device.call("uci", "set", {
-            "config": config,
-            "section": section,
-            "values": payload,
-        })
+        typ = (shown.get(section) or {}).get(".type")
+        scalars = {key: value for key, value in payload.items() if not isinstance(value, list)}
+        lists = {key: value for key, value in payload.items() if isinstance(value, list) and value}
+        if scalars:
+            self._set(config, section, scalars, typ)
+        for key, value in lists.items():
+            self._set(config, section, {key: value}, typ)
+
+    def _set(self, config: str, section: str, values: dict[str, Any], typ: Any) -> None:
+        params: dict[str, Any] = {"config": config, "section": section, "values": values}
+        if typ:
+            params["type"] = str(typ)
+        self._device.call("uci", "set", params)
 
     def add(self, config: str, typ: str, values: dict[str, Any] | None = None, name: str | None = None) -> str:
         params: dict[str, Any] = {"config": config, "type": typ}
@@ -136,6 +145,9 @@ class _HTTPUci:
         shown = self.show(config)
         section = resolve_section(shown, section)
         params: dict[str, Any] = {"config": config, "section": section}
+        typ = (shown.get(section) or {}).get(".type")
+        if typ:
+            params["type"] = str(typ)
         names = [item for item in (options or ([option] if option else [])) if item]
         if len(names) == 1:
             params["option"] = names[0]
@@ -234,6 +246,7 @@ class HTTPDevice(DeviceBase):
         self._luci_token = ""
         self._luci_sid = ""
         self._luci_form_authed = False
+        self._hold_session = False
         self._login()
 
     @classmethod
@@ -594,11 +607,25 @@ class HTTPDevice(DeviceBase):
         data = result[1] if len(result) > 1 else {}
         return status, data
 
-    def call(self, obj: str, method: str, params: dict[str, Any] | None = None, timeout: int | None = None):
+    @contextmanager
+    def hold_session(self) -> Iterator[None]:
+        """Keep one rpcd session for a set/delete/commit batch (per-session UCI overlay)."""
         self._maybe_refresh_session()
+        prev = self._hold_session
+        self._hold_session = True
+        try:
+            yield
+        finally:
+            self._hold_session = prev
+
+    def call(self, obj: str, method: str, params: dict[str, Any] | None = None, timeout: int | None = None):
+        if not self._hold_session:
+            self._maybe_refresh_session()
         last_status = None
         for attempt in range(2):
             if not self.session or self.session == NULL_SESSION:
+                if self._hold_session:
+                    raise DeviceConnectionError(t("err.session_expired"))
                 self._relogin()
             if not self.session or self.session == NULL_SESSION:
                 raise DeviceConnectionError(t("err.not_logged_in"))
@@ -606,15 +633,15 @@ class HTTPDevice(DeviceBase):
             try:
                 status, data = self._call(stale, obj, method, params, timeout=timeout)
             except _SessionExpired:
-                if attempt == 0:
-                    self._relogin(stale)
-                    continue
-                raise DeviceConnectionError(t("err.session_expired"))
+                if self._hold_session or attempt:
+                    raise DeviceConnectionError(t("err.session_expired"))
+                self._relogin(stale)
+                continue
             except _AccessDenied as e:
-                if attempt == 0 and self._session_is_dead(stale):
-                    self._relogin(stale)
-                    continue
-                raise DeviceCommandError(f"ubus {obj}.{method}: {e}") from e
+                if self._hold_session or attempt or not self._session_is_dead(stale):
+                    raise DeviceCommandError(f"ubus {obj}.{method}: {e}") from e
+                self._relogin(stale)
+                continue
             last_status = status
             if status == UBUS_OK:
                 self._last_ok = time.monotonic()

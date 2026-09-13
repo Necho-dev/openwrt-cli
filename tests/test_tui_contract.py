@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from openwrt_cli.tui.app import OpenWrtTUI, _iface_cell, _rule_rows, _route_rows
+import inspect
+
+from openwrt_cli.tui.app import ConfirmModal, OpenWrtTUI, _iface_cell, _rule_rows, _route_rows
 from openwrt_cli.tui.keyhint import KEY_STYLE, highlight_keys
 from openwrt_cli.tui.bandwidth import DualRateChart
 from openwrt_cli.ui.render import display_iface
@@ -26,6 +28,7 @@ def test_tui_layout_contract():
     assert "filter" not in {binding.action for binding in AclLogModal.BINDINGS}
     assert "refresh" in actions
     assert "refresh_or_rename" not in actions
+    assert "markup=False" in inspect.getsource(ConfirmModal.compose)
     from openwrt_cli.tui.app import HostnameModal
 
     assert "#hn-box" in HostnameModal.CSS

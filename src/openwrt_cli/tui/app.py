@@ -561,7 +561,7 @@ class ConfirmModal(ModalScreen[bool]):
 
     def compose(self) -> ComposeResult:
         with Vertical(id="confirm-box"):
-            yield Static(self.message, id="confirm-msg")
+            yield Static(self.message, id="confirm-msg", markup=False)
             yield Static(highlight_keys(t("confirm.hint")), id="confirm-hint")
             with Horizontal(id="confirm-btns"):
                 yield Button(t("action.cancel"), id="cancel")
@@ -844,6 +844,7 @@ class OpenWrtTUI(App):
         self._pw2_focus_sub = ""
         self._pw2_focus_rule = ""
         self._pw2_detection = "off"
+        self._pw2_pending_apply = False
 
     def compose(self) -> ComposeResult:
         with Horizontal(id="brand"):
@@ -1223,6 +1224,9 @@ class OpenWrtTUI(App):
 
     @work
     async def action_svc_action(self, action: str) -> None:
+        if self._pane == "passwall2" and action == "restart":
+            await self._pw2_ask_apply(after_save=False)
+            return
         await self._svc_confirm_action(action)
 
     @work(thread=True, exclusive=True, group="svc-show")
@@ -1951,10 +1955,15 @@ class OpenWrtTUI(App):
             return
         self._pw2_delete_acl(aid)
 
-    async def _pw2_ask_apply(self) -> None:
+    async def _pw2_ask_apply(self, *, after_save: bool = True) -> None:
         ok = await self.push_screen_wait(ConfirmModal(t("confirm.pw2_apply")))
         if ok:
+            self._pw2_pending_apply = False
             self._pw2_apply()
+            return
+        if after_save:
+            self._pw2_pending_apply = True
+            self.notify(t("msg.pw2_saved_pending"), severity="warning")
 
     @work
     async def _pw2_ask_apply_work(self) -> None:
@@ -1968,6 +1977,8 @@ class OpenWrtTUI(App):
             result = ServiceService(self.device).action("passwall2", "restart")
             message = result.message or t("msg.pw2_node_saved")
             severity = "information" if result.ok else "error"
+            if result.ok:
+                self._pw2_pending_apply = False
         except Exception as e:
             message = str(e)
             severity = "error"

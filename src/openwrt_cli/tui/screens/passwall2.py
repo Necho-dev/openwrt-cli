@@ -756,9 +756,9 @@ class NodeFormModal(ModalScreen[bool]):
         allowed = {value for _, value in options}
         proto.value = current if current in allowed else Select.NULL
 
-    def on_button_pressed(self, event: Button.Pressed) -> None:
+    async def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "ok":
-            self.action_save()
+            await self.action_save()
         else:
             self.dismiss(False)
 
@@ -774,9 +774,10 @@ class NodeFormModal(ModalScreen[bool]):
         self._reveal = not self._reveal
         self.query_one("#pw2-nf-password", Input).password = not self._reveal
 
-    def action_save(self) -> None:
+    async def action_save(self) -> None:
         from openwrt_cli.services.passwall2 import PassWall2Service
         from openwrt_cli.services.pw2_share_url import ShareURLError, parse_share_url
+        from openwrt_cli.tui.app import ConfirmModal
 
         fields = self._collect()
         url = fields.pop("_url", "")
@@ -786,11 +787,12 @@ class NodeFormModal(ModalScreen[bool]):
             except ShareURLError as e:
                 self._show_error(str(e))
                 return
+        node_id = str(self.node.get("id") or "")
+        confirm = t("confirm.pw2_node_set", id=node_id) if node_id else t("confirm.pw2_node_add")
+        if not await self.app.push_screen_wait(ConfirmModal(confirm)):
+            return
         svc = PassWall2Service(self.device)
-        if self.node.get("id"):
-            result = svc.node_set(str(self.node["id"]), fields)
-        else:
-            result = svc.node_add(fields)
+        result = svc.node_set(node_id, fields) if node_id else svc.node_add(fields)
         if not result.ok:
             self._show_error(result.message or t("err.pw2_node_invalid", error=""))
             return
@@ -964,6 +966,8 @@ class AclFormModal(ModalScreen[bool]):
         self.device = device
         self.acl = acl or {}
         self.nodes = nodes or []
+        self._original = _acl_originals(self.acl)
+        self._dirty: set[str] = set()
 
     def compose(self) -> ComposeResult:
         title = t("pw2.acl.edit") if self.acl.get("id") else t("pw2.acl.add")
@@ -999,9 +1003,9 @@ class AclFormModal(ModalScreen[bool]):
             else:
                 yield Input(value=value, placeholder=_acl_placeholder(key), id=f"pw2-af-{key}")
 
-    def on_button_pressed(self, event: Button.Pressed) -> None:
+    async def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "ok":
-            self.action_save()
+            await self.action_save()
         else:
             self.dismiss(False)
 
@@ -1013,15 +1017,32 @@ class AclFormModal(ModalScreen[bool]):
     def action_cancel(self) -> None:
         self.dismiss(False)
 
-    def action_save(self) -> None:
-        from openwrt_cli.services.passwall2 import PassWall2Service
+    def on_select_changed(self, event: Select.Changed) -> None:
+        key = _acl_field_key(event.select.id)
+        if not key:
+            return
+        value = _widget_value(event.select, "select")
+        from openwrt_cli.services.pw2_acl_schema import values_equal
 
-        fields = self._collect()
-        svc = PassWall2Service(self.device)
-        if self.acl.get("id"):
-            result = svc.acl_set(str(self.acl["id"]), fields)
+        if values_equal(self._original.get(key), value):
+            self._dirty.discard(key)
         else:
-            result = svc.acl_add({k: v for k, v in fields.items() if v not in ("", [])})
+            self._dirty.add(key)
+
+    async def action_save(self) -> None:
+        from openwrt_cli.services.passwall2 import PassWall2Service
+        from openwrt_cli.tui.app import ConfirmModal
+
+        fields = self._collect_patch()
+        if self.acl.get("id") and not fields:
+            self._show_error(t("err.pw2_acl_no_change"))
+            return
+        acl_id = str(self.acl.get("id") or "")
+        confirm = t("confirm.pw2_acl_set", id=acl_id) if acl_id else t("confirm.pw2_acl_add")
+        if not await self.app.push_screen_wait(ConfirmModal(confirm)):
+            return
+        svc = PassWall2Service(self.device)
+        result = svc.acl_set(acl_id, fields) if acl_id else svc.acl_add(fields)
         if not result.ok:
             self._show_error(result.message or t("err.pw2_acl_invalid", error=""))
             return
@@ -1037,8 +1058,10 @@ class AclFormModal(ModalScreen[bool]):
             kind = kinds[key]
             if kind == "list":
                 out[key] = parse_sources(getattr(widget, "text", "") or "")
+            elif kind in {"switch", "select", "node", "no_redir", "redir", "tri"}:
+                out[key] = _widget_value(widget, "select")
             else:
-                out[key] = _widget_value(widget, "select" if kind != "text" else "text")
+                out[key] = _widget_value(widget, "text")
         proto = str(out.get("remote_dns_protocol") or "")
         opts = self.acl.get("options") or {}
         if proto and "remote_dns_protocol" not in opts and "dns_mode" in opts:
@@ -1046,11 +1069,49 @@ class AclFormModal(ModalScreen[bool]):
             out.pop("remote_dns_protocol", None)
         return out
 
+    def _collect_patch(self) -> dict[str, object]:
+        from openwrt_cli.services.pw2_acl_schema import changed_fields, values_equal
+
+        collected = self._collect()
+        if not self.acl.get("id"):
+            return {key: value for key, value in collected.items() if value not in ("", [])}
+        kinds = {key: kind for key, kind in _ACL_FORM_FIELDS}
+        patch: dict[str, object] = {}
+        for key, value in changed_fields(self._original, collected).items():
+            kind = kinds.get(key, "text")
+            if kind in {"switch", "select", "node", "no_redir", "redir", "tri"} and key not in self._dirty:
+                continue
+            if key == "dns_mode" and values_equal(self._original.get("remote_dns_protocol"), value):
+                continue
+            patch[key] = value
+        return patch
+
 
 def _acl_form_label(key: str) -> str:
     i18n_key = f"pw2.acl.lbl.{key}"
     text = t(i18n_key)
     return text if text != i18n_key else uci_label(key)
+
+
+def _acl_field_key(widget_id: str | None) -> str:
+    if not widget_id or not widget_id.startswith("pw2-af-"):
+        return ""
+    return widget_id[7:]
+
+
+def _acl_originals(acl: dict) -> dict[str, object]:
+    from openwrt_cli.services.pw2_acl_schema import parse_sources
+
+    out: dict[str, object] = {}
+    for key, kind in _ACL_FORM_FIELDS:
+        raw = _acl_raw(acl, key)
+        if kind == "list":
+            out[key] = parse_sources(raw)
+        elif kind == "switch" and key == "enabled" and not raw:
+            out[key] = "1"
+        else:
+            out[key] = raw
+    return out
 
 
 def _acl_raw(acl: dict, key: str) -> str:
@@ -1085,9 +1146,7 @@ def _acl_allow_blank(kind: str) -> bool:
 
 
 def _acl_select_prompt(kind: str) -> str:
-    if kind == "node":
-        return t("pw2.choice.use_global")
-    if kind in {"no_redir", "redir", "tri", "select"}:
+    if kind in {"node", "no_redir", "redir", "tri", "select"}:
         return t("pw2.choice.use_global")
     return "—"
 

@@ -6,7 +6,7 @@ from rich.text import Text
 from typer.testing import CliRunner
 
 from openwrt_cli.app import app
-from openwrt_cli.core.http_client import luci_action_allowed
+from openwrt_cli.core.http_client import _HTTPUci, luci_action_allowed
 from openwrt_cli.i18n import set_language
 from openwrt_cli.core.errors import CapabilityError, DeviceCommandError
 from openwrt_cli.services.passwall2 import (
@@ -782,3 +782,57 @@ def test_acl_schema_and_write():
     fail = PassWall2Service(denied).acl_add({"remarks": "X", "sources": ["1.1.1.1"]})
     assert fail.ok is False
     assert fail.data["error"] == "pw2_write_denied"
+
+    from openwrt_cli.services.pw2_acl_schema import changed_fields
+    from openwrt_cli.tui.screens.passwall2 import _acl_originals
+
+    original = _acl_originals({
+        "options": {
+            "enabled": "1",
+            "remarks": "RPA试用网段",
+            "sources": ["192.168.9.151-192.168.9.155"],
+            "tcp_no_redir_ports": "disable",
+        }
+    })
+    collected = {
+        **original,
+        "tcp_no_redir_ports": "",
+        "udp_redir_ports": "",
+        "node": "",
+        "loglevel": "",
+    }
+    assert changed_fields(original, collected) == {"tcp_no_redir_ports": ""}
+    untouched = {**original, "tcp_no_redir_ports": "disable", "udp_redir_ports": ""}
+    assert changed_fields(original, untouched) == {}
+
+    silent = FakeDevice(values=deepcopy(FIXTURE))
+    silent.uci.set_values = lambda *_a, **_k: None  # type: ignore[method-assign]
+    dropped = PassWall2Service(silent).acl_set("cfgacl2", {"tcp_redir_ports": "1:65535"})
+    assert dropped.ok is False
+    assert dropped.data["error"] == "pw2_write_not_persisted"
+    assert silent.uci.values["cfgacl2"]["tcp_redir_ports"] == "80,443"
+
+
+def test_http_uci_set_adds_type_and_splits_lists():
+    class Dev:
+        def __init__(self):
+            self.calls = []
+
+        def call(self, obj, method, params=None, timeout=None):
+            self.calls.append((obj, method, params))
+            if method == "get":
+                return {"values": {"cfgacl": {".type": "acl_rule", "remarks": "A"}}}
+            return {}
+
+    device = Dev()
+    uci = _HTTPUci(device)
+    uci.set_values("passwall2", "cfgacl", {"remarks": "B", "sources": ["192.168.9.151-192.168.9.155"]})
+    sets = [item for item in device.calls if item[1] == "set"]
+    assert len(sets) == 2
+    assert sets[0][2]["type"] == "acl_rule"
+    assert sets[0][2]["values"] == {"remarks": "B"}
+    assert sets[1][2]["values"] == {"sources": ["192.168.9.151-192.168.9.155"]}
+    uci.delete("passwall2", "cfgacl", options=["tcp_redir_ports", "node"])
+    deleted = [item for item in device.calls if item[1] == "delete"]
+    assert deleted[-1][2]["type"] == "acl_rule"
+    assert deleted[-1][2]["options"] == ["tcp_redir_ports", "node"]

@@ -11,6 +11,17 @@ A `vX.Y.Z` tag is published only when **both** this file and
 [CHANGELOG.zh.md](CHANGELOG.zh.md) have a matching `## [X.Y.Z]` section.
 The English section becomes the GitHub Release body, with a link to the Chinese notes.
 
+## [1.1.1] - 2026-09-13
+
+Patch for PassWall2 TUI writes: restart could succeed while UCI stayed unchanged, and confirm text could hide the service name.
+
+### Fixed
+
+- ACL edit writes only fields you changed. Empty untouched port or node Selects no longer clear UCI back to “use global”.
+- HTTP `uci.set` / `commit` stay on one rpcd session, send the section type, and re-read after write. A silent no-op no longer offers restart.
+- Confirm dialogs no longer swallow bracketed names (`[passwall2]`, ACL ids) as Rich markup.
+- Saving a node or ACL asks twice: save to UCI, then whether to restart now. Cancel restart shows “saved, pending”; press `t` later to apply.
+
 ## [1.1.0] - 2026-09-13
 
 Feature release **1.1.0**. Optional **PassWall2** and **Bandix hostname** become first-class on CLI and TUI. The Agent JSON contract is unchanged: success and failure are one object with `ok`, and service fields are flattened into that object.

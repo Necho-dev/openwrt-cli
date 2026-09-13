@@ -101,6 +101,21 @@ def _truthy(value: Any) -> bool:
     return str(value).lower() in {"1", "true", "yes", "on"}
 
 
+def values_equal(left: Any, right: Any) -> bool:
+    if isinstance(left, list) or isinstance(right, list):
+        return parse_sources(left) == parse_sources(right)
+    return _as_text(left) == _as_text(right)
+
+
+def changed_fields(original: dict[str, Any], collected: dict[str, Any]) -> dict[str, Any]:
+    """Keep only collected keys that differ from the current UCI snapshot."""
+    return {
+        key: value
+        for key, value in collected.items()
+        if not values_equal(original.get(key), value)
+    }
+
+
 def looks_like_display(value: Any) -> bool:
     text = _as_text(value).strip()
     if not text:

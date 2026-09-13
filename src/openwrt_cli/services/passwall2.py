@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from contextlib import nullcontext
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -802,6 +803,25 @@ class PassWall2Service:
             "latency": latency,
         }, "pw2_ping")
 
+    def _uci_batch(self):
+        hold = getattr(self.device, "hold_session", None)
+        return hold() if callable(hold) else nullcontext()
+
+    def _option_mismatch(self, opts: dict[str, Any], normalized: dict[str, Any], clear: set[str]) -> list[str]:
+        bad: list[str] = []
+        for key, value in normalized.items():
+            current = opts.get(key)
+            if isinstance(value, list):
+                if _as_list(current) != [str(item) for item in value]:
+                    bad.append(key)
+            elif _as_text(current) != _as_text(value):
+                bad.append(key)
+        for key in sorted(clear):
+            current = opts.get(key)
+            if current not in (None, "", []):
+                bad.append(key)
+        return bad
+
     def _write_error(self, exc: Exception) -> CommandResult:
         if _is_write_denied(exc):
             return CommandResult.fail(
@@ -868,8 +888,9 @@ class PassWall2Service:
                 data={"error": "pw2_node_invalid", "errors": errors},
             )
         try:
-            node_id = self.device.uci.add("passwall2", "nodes", values=normalized)
-            self.device.uci.commit("passwall2")
+            with self._uci_batch():
+                node_id = self.device.uci.add("passwall2", "nodes", values=normalized)
+                self.device.uci.commit("passwall2")
         except DeviceCommandError as e:
             return self._write_error(e)
         applied = False
@@ -928,13 +949,22 @@ class PassWall2Service:
                 data={"error": "pw2_node_invalid", "errors": errors},
             )
         try:
-            if normalized:
-                self.device.uci.set_values("passwall2", node_id, normalized)
-            if clear:
-                self.device.uci.delete("passwall2", node_id, options=sorted(clear))
-            self.device.uci.commit("passwall2")
+            with self._uci_batch():
+                if normalized:
+                    self.device.uci.set_values("passwall2", node_id, normalized)
+                if clear:
+                    self.device.uci.delete("passwall2", node_id, options=sorted(clear))
+                self.device.uci.commit("passwall2")
         except DeviceCommandError as e:
             return self._write_error(e)
+        fresh_check = self._values()
+        mismatch = self._option_mismatch(_options(fresh_check.get(node_id) or {}), normalized, clear)
+        if mismatch:
+            return CommandResult.fail(
+                t("err.pw2_write_not_persisted", keys=", ".join(mismatch)),
+                transport=self.device.transport,
+                data={"error": "pw2_write_not_persisted", "id": node_id, "keys": mismatch},
+            )
         applied = False
         warnings: list[str] = []
         if apply:
@@ -971,10 +1001,11 @@ class PassWall2Service:
             )
         remarks = _as_text(sec.get("remarks")) or node_id
         try:
-            if refs and force:
-                self._clear_node_refs(values, node_id, refs)
-            self.device.uci.delete("passwall2", node_id)
-            self.device.uci.commit("passwall2")
+            with self._uci_batch():
+                if refs and force:
+                    self._clear_node_refs(values, node_id, refs)
+                self.device.uci.delete("passwall2", node_id)
+                self.device.uci.commit("passwall2")
         except DeviceCommandError as e:
             return self._write_error(e)
         applied = False
@@ -1250,8 +1281,9 @@ class PassWall2Service:
                 data={"error": "pw2_acl_invalid", "errors": errors},
             )
         try:
-            acl_id = self.device.uci.add("passwall2", "acl_rule", values=normalized)
-            self.device.uci.commit("passwall2")
+            with self._uci_batch():
+                acl_id = self.device.uci.add("passwall2", "acl_rule", values=normalized)
+                self.device.uci.commit("passwall2")
         except DeviceCommandError as e:
             return self._write_error(e)
         fresh = self._values()
@@ -1301,14 +1333,22 @@ class PassWall2Service:
             if key not in normalized and key in clearable:
                 clear.add(key)
         try:
-            if normalized:
-                self.device.uci.set_values("passwall2", acl_id, normalized)
-            if clear:
-                self.device.uci.delete("passwall2", acl_id, options=sorted(clear))
-            self.device.uci.commit("passwall2")
+            with self._uci_batch():
+                if normalized:
+                    self.device.uci.set_values("passwall2", acl_id, normalized)
+                if clear:
+                    self.device.uci.delete("passwall2", acl_id, options=sorted(clear))
+                self.device.uci.commit("passwall2")
         except DeviceCommandError as e:
             return self._write_error(e)
         fresh = self._values()
+        mismatch = self._option_mismatch(_options(fresh.get(acl_id) or {}), normalized, clear)
+        if mismatch:
+            return CommandResult.fail(
+                t("err.pw2_write_not_persisted", keys=", ".join(mismatch)),
+                transport=self.device.transport,
+                data={"error": "pw2_write_not_persisted", "id": acl_id, "keys": mismatch},
+            )
         return self._finish_write(
             self._acl_payload(acl_id, fresh, applied=False),
             kind="pw2_acl_rule",
@@ -1326,8 +1366,9 @@ class PassWall2Service:
             return sec
         remarks = _as_text(sec.get("remarks")) or acl_id
         try:
-            self.device.uci.delete("passwall2", acl_id)
-            self.device.uci.commit("passwall2")
+            with self._uci_batch():
+                self.device.uci.delete("passwall2", acl_id)
+                self.device.uci.commit("passwall2")
         except DeviceCommandError as e:
             return self._write_error(e)
         return self._finish_write(
@@ -1359,8 +1400,9 @@ class PassWall2Service:
             new_list.append(item)
             added.append(item)
         try:
-            self.device.uci.set_values("passwall2", acl_id, {"sources": new_list})
-            self.device.uci.commit("passwall2")
+            with self._uci_batch():
+                self.device.uci.set_values("passwall2", acl_id, {"sources": new_list})
+                self.device.uci.commit("passwall2")
         except DeviceCommandError as e:
             return self._write_error(e)
         return self._finish_write(
@@ -1393,11 +1435,12 @@ class PassWall2Service:
         new_list = [item for item in current if item not in drop]
         removed = [item for item in incoming if item in current]
         try:
-            if new_list:
-                self.device.uci.set_values("passwall2", acl_id, {"sources": new_list})
-            else:
-                self.device.uci.delete("passwall2", acl_id, options=["sources"])
-            self.device.uci.commit("passwall2")
+            with self._uci_batch():
+                if new_list:
+                    self.device.uci.set_values("passwall2", acl_id, {"sources": new_list})
+                else:
+                    self.device.uci.delete("passwall2", acl_id, options=["sources"])
+                self.device.uci.commit("passwall2")
         except DeviceCommandError as e:
             return self._write_error(e)
         return self._finish_write(

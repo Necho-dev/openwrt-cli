@@ -24,10 +24,6 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: publish-pypi-${{ github.ref }}
-  cancel-in-progress: false
-
 jobs:
   # Inline tests. Calling unit-test.yml via workflow_call from a tag
   # push dies with startup_failure (no jobs, GitHub generic Error page).

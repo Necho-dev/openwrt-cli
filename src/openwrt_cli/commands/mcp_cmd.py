@@ -5,8 +5,10 @@ from __future__ import annotations
 import typer
 
 from openwrt_cli.commands.common import FormatOpt, YesOpt, apply_opts, get_app
+from openwrt_cli.core.config import McpModeError, mcp_mode
 from openwrt_cli.i18n import _, t
 from openwrt_cli.mcp.extra import mcp_extra_installed, resolve_mcp_launch
+from openwrt_cli.mcp.guard import PRIVILEGE_MODES, privilege_rows
 from openwrt_cli.mcp.guide import agent_prompt, json_snippet, recommended_paths
 from openwrt_cli.mcp.targets import client_by_id, mcp_client_ids
 from openwrt_cli.services.result import CommandResult
@@ -43,11 +45,12 @@ def mcp_overview(ctx: typer.Context, format: FormatOpt = None, yes: YesOpt = Fal
     launch = resolve_mcp_launch(None)
     data = {
         "writes_config": False,
-        "next": ["json", "prompt", "path"],
+        "next": ["json", "prompt", "path", "privilege"],
         "commands": {
             "json": "openwrt mcp json",
             "prompt": "openwrt mcp prompt",
             "path": "openwrt mcp path",
+            "privilege": "openwrt mcp privilege",
         },
         "launch": launch,
     }
@@ -108,6 +111,23 @@ def mcp_prompt_cmd(
         )
         return
     app.console.print(text)
+
+
+@mcp_app.command("privilege", help=_("help.mcp.privilege"))
+def mcp_privilege(ctx: typer.Context, format: FormatOpt = None, yes: YesOpt = False) -> None:
+    app = apply_opts(get_app(ctx), format, yes)
+    mode = None
+    warnings: list[str] = []
+    try:
+        mode = mcp_mode(app.cfg)
+    except McpModeError as exc:
+        warnings.append(t("err.mcp_mode", mode=exc.mode))
+    data = {"mode": mode, "modes": list(PRIVILEGE_MODES), "tools": privilege_rows()}
+    emit(
+        app.console,
+        CommandResult.ok_data(data, transport="", kind="mcp_privilege", warnings=warnings or None),
+        app.format,
+    )
 
 
 @mcp_app.command("path", help=_("help.mcp.path"))

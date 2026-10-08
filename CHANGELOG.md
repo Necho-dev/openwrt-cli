@@ -6,12 +6,44 @@ All notable changes to this project are documented here.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versioning follows [SemVer](https://semver.org/).
+Under each version, group entries as **Added**, **Improved**, and **Fixed**, one change per bullet.
 
 A `vX.Y.Z` tag is published only when **both** this file and
 [CHANGELOG.zh.md](CHANGELOG.zh.md) have a matching `## [X.Y.Z]` section.
 The English section becomes the GitHub Release body, with a link to the Chinese notes.
 
 ## [Unreleased]
+
+## [1.3.0] - 2026-10-08
+
+### Added
+
+#### Multiple router profiles
+
+`~/.openwrt-cli.yaml` stores more than one router login. CLI, TUI, and MCP share the `active` name. Host, user, port, transport, password, and key live on the profile. `language` and the global `mcp.mode` stay at the top. A profile may set its own `mcp.mode` (`readonly` or `readwrite`); otherwise it inherits the global default. `openwrt config` shows the language, the global mode, the active name, and the computed effective mode. It no longer prints host, user, or password.
+
+- `openwrt profiles list`, `show`, `add`, `update`, `use`, and `del` manage the profiles. Every subcommand accepts `--json`. Passwords in that output are masked. `list` marks the active row with `●`.
+- The profile name is chosen when it is added. It is not taken from the login user (`-u`). `openwrt user` is still the router system user.
+- `add NAME` with no connection flags walks through the host and login on a terminal. `update` with no field flags edits each value and keeps the current one on Enter. `use` with no name picks a profile with the arrow keys. Without a terminal, those commands require the name (and, for `update`, the fields) or they exit with an error.
+- The first `openwrt setup` walks through creating a profile. The suggested name is `home`; Enter accepts it. A later setup updates the profile you name and keeps the others.
+- `--save-config` writes the connection used by this process into the active profile. It does not create a profile. `-H`, `-u`, and `-p` on a normal command override the connection for that process only.
+- In the TUI, `u` or a click on the host at the bottom right switches the active profile. The file is updated only after the new connection succeeds. A failed connection leaves the current session in place. The PassWall2 tab follows the router you land on.
+- Deleting the last profile is allowed. Language and the global MCP permission stay; connecting again requires a new profile. The TUI cannot delete a profile.
+- A flat config file loads as a profile named `default`. A read does not rewrite the file. The next save writes the new shape and keeps the language and the global MCP permission. A file that still uses the `users` list key is read the same way and rewritten as `profiles` on the next save. There is no migration prompt.
+
+#### MCP profiles and permissions
+
+An Agent can see which profile is active and can name another one on a single tool call. That call does not change the profile selected in the CLI or TUI.
+
+- `openwrt mcp privilege` prints each MCP tool against `readonly` and `readwrite`. A check or cross shows whether the tool is allowed. The effective permission column is highlighted. Reboot, shutdown, backup restore, and user add / passwd / delete are not MCP tools, so they are not in the table.
+- `profiles_list` and `profiles_current` are local reads. Each row has the name, the target (for example `SSH  root@host:22`), the effective permission, and whether it is the active profile. They do not dial the router and do not return passwords or key paths. `config_show` stays the global view: language, active name, global mode, and effective mode.
+- Every other router tool takes an optional `profile`. Omit it, or pass an empty string, to use the active profile. Pass a name to use that profile for this call only. The result includes `profile`. An unknown name returns `profile_missing` and does not dial.
+- Different profiles can be queried at the same time. Calls that use the same connection still run one at a time. The connection stays open until the MCP process exits. Do not run `openwrt profiles use` to aim later MCP calls at another router.
+- Write permission follows the profile named on that call. Grant writes for one router with `openwrt profiles update NAME --mcp-mode readwrite`. `openwrt config set --mcp-mode` changes the global default for every profile that does not set its own.
+
+### Fixed
+
+- TUI tables update cells in place on refresh. The scroll position and the scrollbar no longer jump back to the top.
 
 ## [1.2.0] - 2026-09-13
 

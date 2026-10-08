@@ -1,6 +1,6 @@
 # openwrt-ops tools
 
-Use MCP tools when `openwrt-mcp` is configured. Do not invent `system_reboot` or other high-risk names.
+Use MCP tools when `openwrt-mcp` is configured. Do not invent `system_reboot` or other high-risk names. `openwrt mcp privilege` lists every tool and whether the current mode allows it.
 
 ## Read (always listed)
 
@@ -22,7 +22,11 @@ Use MCP tools when `openwrt-mcp` is configured. Do not invent `system_reboot` or
 | `passwall2_node_ping` | One node ICMP or TCPing |
 | `passwall2_acl` / `passwall2_acl_show` | ACL rules |
 | `passwall2_logs` | Runtime log (truncated) |
-| `config_show` | Local yaml; password masked; includes `mcp.mode` |
+| `profiles_current` | Active profile: name, target, effective permission. Does not switch or dial |
+| `profiles_list` | Saved profiles (name, target, effective permission, active flag). No passwords or key paths |
+| `config_show` | Global config, active profile name, effective `mcp.mode`. No passwords |
+
+Router tools accept optional `profile`. Omit it to use the active profile. Pass a name to query that profile for this call only. This does not change `active`. Writes follow that profile's effective `mcp.mode`.
 
 ## Write (`mcp.mode=readwrite` + user confirm)
 

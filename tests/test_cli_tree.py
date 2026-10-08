@@ -15,7 +15,7 @@ def _plain(text: str) -> str:
     return re.sub(r"\x1b\[[0-9;]*[mK]", "", text or "")
 
 _GROUPS = (
-    "network", "firewall", "qos", "service", "passwall2", "user", "backup",
+    "network", "firewall", "qos", "service", "passwall2", "user", "profiles", "backup",
     "system", "config", "doctor", "skill", "mcp",
 )
 _TOP = ("setup", "tui", "wizard", "logs")

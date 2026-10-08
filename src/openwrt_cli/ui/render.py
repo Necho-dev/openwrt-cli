@@ -8,6 +8,7 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
+from openwrt_cli.core.config import profile_target
 from openwrt_cli.i18n import t
 from openwrt_cli.services.result import CommandResult
 
@@ -159,11 +160,20 @@ def _render_text(console: Console, result: CommandResult) -> None:
     if kind == "mcp_path" and isinstance(data, dict):
         _render_mcp_path(console, data)
         return
+    if kind == "mcp_privilege" and isinstance(data, dict):
+        _render_mcp_privilege(console, data)
+        return
     if kind == "mcp_guide" and isinstance(data, dict):
         _render_mcp_guide(console, data)
         return
     if kind == "config" and isinstance(data, dict):
         _render_config(console, data)
+        return
+    if kind == "profiles" and isinstance(data, dict):
+        _render_profiles(console, data)
+        return
+    if kind == "profile" and isinstance(data, dict):
+        _render_profile(console, data)
         return
     if kind == "status" and isinstance(data, dict):
         _render_status(console, data)
@@ -710,6 +720,36 @@ def _render_skill(console: Console, data: dict[str, Any]) -> None:
         )
 
 
+def _privilege_mark(allowed: bool) -> Text:
+    if allowed:
+        return Text("✓", style="bold #67c23a")
+    return Text("✗", style="dim")
+
+
+def _render_mcp_privilege(console: Console, data: dict[str, Any]) -> None:
+    mode = data.get("mode")
+    if mode:
+        console.print(t("mcp.privilege.current", mode=mode))
+    modes = [str(name) for name in (data.get("modes") or [])]
+    table = Table(header_style="accent", show_lines=False)
+    table.add_column(t("col.tool"))
+    table.add_column(t("col.capability"))
+    for name in modes:
+        current = name == mode
+        table.add_column(
+            f"● {name}" if current else name,
+            justify="center",
+            header_style="bold #67c23a" if current else "accent",
+        )
+    for item in data.get("tools") or []:
+        if not isinstance(item, dict):
+            continue
+        cells: list[Any] = [item.get("tool") or "—", item.get("capability") or "—"]
+        cells.extend(_privilege_mark(bool(item.get(name))) for name in modes)
+        table.add_row(*cells)
+    console.print(table)
+
+
 def _render_mcp_path(console: Console, data: dict[str, Any]) -> None:
     rows = []
     for item in data.get("paths") or []:
@@ -736,6 +776,7 @@ def _render_mcp_guide(console: Console, data: dict[str, Any]) -> None:
         [commands.get("json") or "openwrt mcp json", t("mcp.guide.next_json")],
         [commands.get("prompt") or "openwrt mcp prompt", t("mcp.guide.next_prompt")],
         [commands.get("path") or "openwrt mcp path", t("mcp.guide.next_path")],
+        [commands.get("privilege") or "openwrt mcp privilege", t("mcp.guide.next_privilege")],
     ]
     _table(console, [t("col.command"), t("col.detail")], rows)
     console.print(t("mcp.guide.no_write"))
@@ -746,26 +787,62 @@ def _render_mcp_guide(console: Console, data: dict[str, Any]) -> None:
 
 
 def _render_config(console: Console, data: dict[str, Any]) -> None:
-    transport = (data.get("transport") or "").lower()
+    mcp = data.get("mcp") if isinstance(data.get("mcp"), dict) else {}
     rows = [
         [t("cfg.path"), data.get("path") or "—"],
-        [t("cfg.host"), data.get("host") or "—"],
-        [t("cfg.user"), data.get("user") or "—"],
-        [t("cfg.transport"), data.get("transport") or "—"],
+        [t("cfg.language"), data.get("language") or "—"],
+        [t("cfg.active"), data.get("active") or "—"],
+        [t("cfg.mcp_mode"), mcp.get("mode") or "—"],
+        [t("cfg.mcp_effective"), mcp.get("effective") or "—"],
     ]
-    if transport == "http":
-        rows.append([t("cfg.scheme"), data.get("scheme") or "—"])
-    rows.append([t("cfg.port"), data.get("port") if data.get("port") is not None else "—"])
-    rows.append([t("cfg.language"), data.get("language") or "—"])
-    if data.get("identity_file"):
-        rows.append([t("cfg.identity"), data.get("identity_file")])
-    if transport == "http":
-        verify = data.get("verify_ssl")
-        rows.append([t("cfg.verify_ssl"), t("label.yes") if verify else t("label.no")])
-        rows.append([t("cfg.url"), f"{data.get('scheme') or 'https'}://{data.get('host') or '—'}:{data.get('port') or '—'}/ubus"])
-    rows.append([t("cfg.password"), data.get("password") or "—"])
-    mcp = data.get("mcp") if isinstance(data.get("mcp"), dict) else {}
-    rows.append([t("cfg.mcp_mode"), mcp.get("mode") or "—"])
+    _table(console, [t("col.item"), t("col.value")], rows)
+
+
+def _render_profiles(console: Console, data: dict[str, Any]) -> None:
+    active = data.get("active")
+    rows: list[tuple[list[str], bool]] = []
+    for user in data.get("profiles") or []:
+        if not isinstance(user, dict):
+            continue
+        stored = user.get("mcp") if isinstance(user.get("mcp"), dict) else {}
+        mode = str(stored.get("mode") or t("mcp.inherit"))
+        name = str(user.get("name") or "—")
+        current = name == active
+        rows.append(([f"● {name}" if current else f"  {name}", profile_target(user), mode], current))
+    if not rows:
+        console.print(f"[muted]{t('empty.profiles')}[/muted]")
+        return
+    table = Table(header_style="accent", show_lines=False)
+    for header in (t("col.profile"), t("col.target"), t("col.mcp")):
+        table.add_column(header)
+    for cells, current in rows:
+        table.add_row(*cells, style="bold green" if current else None)
+    console.print(table)
+
+
+def _render_profile(console: Console, data: dict[str, Any]) -> None:
+    profile = data.get("profile") if isinstance(data.get("profile"), dict) else {}
+    stored = profile.get("mcp") if isinstance(profile.get("mcp"), dict) else {}
+    mode = str(stored.get("mode") or t("mcp.inherit"))
+    rows: list[list[str]] = [
+        [t("col.profile"), str(profile.get("name") or "—")],
+        [t("col.active"), t("label.yes") if data.get("current") else t("label.no")],
+        [t("cfg.host"), str(profile.get("host") or "—")],
+        [t("cfg.user"), str(profile.get("user") or "—")],
+        [t("cfg.transport"), str(profile.get("transport") or "—")],
+    ]
+    if profile.get("scheme"):
+        rows.append([t("cfg.scheme"), str(profile.get("scheme"))])
+    if profile.get("port") is not None:
+        rows.append([t("cfg.port"), str(profile.get("port"))])
+    if profile.get("identity_file"):
+        rows.append([t("cfg.identity"), str(profile.get("identity_file"))])
+    if "verify_ssl" in profile:
+        rows.append([t("cfg.verify_ssl"), t("label.yes") if profile.get("verify_ssl") else t("label.no")])
+    if profile.get("password"):
+        rows.append([t("cfg.password"), str(profile.get("password"))])
+    rows.append([t("cfg.mcp_mode"), mode])
+    rows.append([t("cfg.mcp_effective"), str(profile.get("mcp_effective") or "—")])
     _table(console, [t("col.item"), t("col.value")], rows)
 
 

@@ -65,7 +65,8 @@ The command is **`openwrt`**. `openwrt-cli` is still installed as a compatibilit
 - **PassWall2** — optional `luci-app-passwall2`; **requires openwrt-cli &gt;= 1.1.0**. Read status / nodes / ACL / logs; add, edit, delete nodes and ACL; TUI tab `7` when the package is present
 - **One device model** — SSH and HTTP share ubus / uci / shell semantics; missing capability fails loudly (no fake data)
 - **Agent-ready** — `-f json` / `-f compact`, no TTY or color required
-- **MCP / Skills** — wire Cursor / Claude Code / Codex in [Drop it into your AI agent](#drop-it-into-your-ai-agent). Default `mcp.mode` is **readonly**
+- **Profiles** — several router logins in one file. `openwrt profiles` manages them; the TUI host label switches the active one
+- **MCP / Skills** — wire Cursor / Claude Code / Codex in [Drop it into your AI agent](#drop-it-into-your-ai-agent). A tool can name a profile for that call. Default `mcp.mode` is **readonly**
 - **English / 简体中文 UI** — command names stay English
 
 ## Quick Start
@@ -153,6 +154,8 @@ Flags may sit before or after a subcommand (`openwrt network leases -f json`). F
 
 Success and failure are one object with `ok`. Interactive commands (`setup`, `tui`, `wizard`) refuse JSON (`error: interactive`). Destructive actions prompt on a TTY; in a pipe or JSON mode they need `--yes` or they exit `2`.
 
+`-H`, `-u`, `-p`, `--ssh`, `--http`, and `--https` on `profiles` and `config` are fields of the profile being edited. On every other command they override the connection for this process only, and they do not rewrite `~/.openwrt-cli.yaml` unless you also pass `--save-config`.
+
 ### doctor / system / logs
 
 ```bash
@@ -227,6 +230,47 @@ openwrt backup create -o /tmp/bak.tar.gz
 openwrt backup restore /tmp/bak.tar.gz --yes
 ```
 
+### profiles / config
+
+Saved router logins live under `openwrt profiles`. `openwrt config` is the rest of the file: UI language, the global MCP permission, and which profile is active. It does not print the host or the password. `openwrt user` is the router system user, not this list.
+
+```bash
+openwrt profiles list                  # active row marked with ●
+openwrt profiles show                  # active profile; password masked
+openwrt profiles show lab
+openwrt profiles add shop-rpa          # terminal: host and login
+openwrt profiles add home -H 192.168.1.1 -u root --ssh
+openwrt profiles use lab               # switch the active profile
+openwrt profiles use                   # arrow keys, then Enter
+openwrt profiles update home           # edit each field; Enter keeps the current value
+openwrt profiles update lab --mcp-mode readwrite
+openwrt profiles update lab --mcp-mode inherit
+openwrt profiles del lab
+openwrt config show
+openwrt config path
+openwrt config set --language en
+openwrt config set --mcp-mode readonly # global default for profiles that do not set their own
+```
+
+Every `profiles` subcommand accepts `--json`. Omit the name on `show` to print the active profile. On a terminal, `add`, `update`, and `use` ask for anything you left out. Deleting the last profile is allowed; language and the global MCP permission stay. File layout and the upgrade from an older single-host file are in [Configuration](#configuration).
+
+### mcp / skill
+
+These commands do not connect to the router. `mcp` prints client snippets and the permission table. `skill` installs the `openwrt-ops` playbook.
+
+```bash
+openwrt mcp privilege                  # each tool vs readonly / readwrite
+openwrt mcp json
+openwrt mcp json --client cursor
+openwrt mcp prompt
+openwrt mcp path
+openwrt skill detect
+openwrt skill install
+openwrt skill show
+```
+
+An MCP router tool can take `profile` for that call only. Omit it to use the active profile. See [Drop it into your AI agent](#drop-it-into-your-ai-agent).
+
 ### setup / wizard / tui
 
 ```bash
@@ -236,29 +280,61 @@ openwrt wizard wifi            # user | hostname | wifi | lan | service
 openwrt tui
 ```
 
-TUI keys: `1`–`6` tabs (`7` PassWall2 when `luci-app-passwall2` is present; **openwrt-cli &gt;= 1.1.0**), `r` refresh, `e` edit (Neighbors hostname / PassWall2 node or ACL), `f` filter, `q` quit, `?` help.
+TUI keys: `1`–`6` tabs (`7` PassWall2 when `luci-app-passwall2` is present; **openwrt-cli &gt;= 1.1.0**), `r` refresh, `e` edit (Neighbors hostname / PassWall2 node or ACL), `u` switch profile (or click the host in the bottom-right corner), `f` filter, `q` quit, `?` help.
 
 ## Configuration
 
-`openwrt setup` or `--save-config` writes `~/.openwrt-cli.yaml`:
+`openwrt setup` or `--save-config` writes `~/.openwrt-cli.yaml`. The file holds every saved router as a named profile, plus one `active` name. CLI commands, the TUI, and MCP all start from that name. Host, user, port, transport, password, and key belong to the profile. `language` and `mcp.mode` stay global. A profile may set its own `mcp.mode`; when it does not, it inherits the global default.
+
+The first `openwrt setup` asks for a profile name (Enter keeps `home`), then the host and login. A later setup updates the profile you name and leaves the others in place. `-H`, `-u`, and `-p` on an ordinary command override the connection for that process only and do not rewrite the file unless you also pass `--save-config`. `--save-config` updates the active profile; it does not create one.
+
+An older file with the host at the top level loads as a profile named `default`. Reading it does not rewrite the file. The next save writes the shape below and keeps the language and the global MCP permission.
 
 ```yaml
-host: 192.168.1.1
-user: root
-port: 22
-transport: ssh
-# password: prefer an SSH key
-identity_file: ~/.ssh/id_ed25519_openwrt
+language: en
+mcp:
+  mode: readonly          # global default
+active: home
+profiles:
+  - name: home
+    host: 192.168.1.1
+    user: root
+    port: 22
+    transport: ssh
+    identity_file: ~/.ssh/id_ed25519_openwrt
+  - name: lab
+    host: 10.0.0.1
+    user: root
+    transport: http
+    scheme: https
+    port: 443
+    verify_ssl: false
+    mcp:
+      mode: readwrite     # this profile only
 ```
 
 ```bash
-openwrt config show
+openwrt config show          # language, global mcp.mode, active name, effective mode
 openwrt config path
-openwrt config set -H 192.168.1.1 --ssh
 openwrt config set --language en
-openwrt config set --mcp-mode readonly    # default
-openwrt config set --mcp-mode readwrite   # MCP write tools (user must confirm)
+openwrt config set --mcp-mode readonly     # global default
+openwrt config set --mcp-mode readwrite    # MCP write tools (user must confirm)
+openwrt profiles list
+openwrt profiles show                  # active profile; password masked
+openwrt profiles show lab
+openwrt profiles add shop-rpa          # host and login, step by step
+openwrt profiles add home -H 192.168.1.1 -u root --ssh -i ~/.ssh/id_ed25519_openwrt
+openwrt profiles add lab -H 10.0.0.1 --https --mcp-mode readwrite
+openwrt profiles use lab
+openwrt profiles use                 # arrow keys, then Enter
+openwrt profiles update                 # arrow keys, then edit each field
+openwrt profiles update home            # edit each field; Enter keeps the current value
+openwrt profiles update home --name house
+openwrt profiles update lab --mcp-mode inherit   # follow the global default again
+openwrt profiles del lab
 ```
+
+`profiles add` requires a name you choose. `-u` is the login user on that router, not the profile name. `openwrt user` is still the router system user. `profiles show` and `profiles list --json` mask the password. `profiles del` may remove the last profile; language and the global MCP permission stay, and the next connection needs a new profile. In the TUI, `u` or a click on the bottom-right host switches the active profile after the new connection succeeds.
 
 ## Drop it into your AI agent
 
@@ -291,6 +367,7 @@ That copies `openwrt-ops` into the Agent skill directory (Cursor `~/.cursor/skil
 
 ```bash
 pip install 'openwrt-cli[mcp]'   # skip if install.sh already did this
+openwrt mcp privilege            # tools allowed under the current MCP permission
 openwrt mcp json                 # generic mcpServers.openwrt
 openwrt mcp json --client cursor
 openwrt mcp path                 # recommended file per client
@@ -322,18 +399,27 @@ Reload MCP in the client. The server key must stay `openwrt`. If `openwrt-mcp` i
 
 | | Tools |
 |---|---|
-| **First hop** | `doctor` · `config_show` (password masked) |
+| **First hop** | `profiles_current` · `profiles_list` · `doctor` · `config_show` (no passwords) |
 | **Read** | `system_status` · `network_overview` · `network_neighbors` · `network_leases` · `firewall_view` · `service_list` · `passwall2_status` · `passwall2_nodes` (no Ping) · `passwall2_logs` · `logs_read` |
 | **Write** | only when `mcp.mode=readwrite` **and** you confirm in chat (`wifi_set`, `lan_set`, PassWall2 node/ACL, `service_action`, …) |
 | **Never MCP** | reboot · shutdown · backup restore · user add / passwd / delete — human CLI only (`openwrt system reboot --yes`) |
 
-Default `mcp.mode` is **readonly**. Writes return `mcp_readonly` until:
+### Which router the agent talks to
+
+`profiles_current` is the active profile. `profiles_list` lists every saved name, target, and effective permission. Neither tool dials the router, and neither returns a password or a key path.
+
+Router tools take an optional `profile`. Omit it to use the active profile. Pass a name to use that profile for this call only. The result includes `profile`, so two routers in one turn stay distinct. This does not change the profile selected in the CLI or TUI. Do not have the agent run `openwrt profiles use` to retarget later calls.
+
+Different profiles can be queried at the same time. A write is allowed only when **that** profile's effective mode is `readwrite`.
+
+Default `mcp.mode` is **readonly**. Writes return `mcp_readonly` until the user changes it:
 
 ```bash
-openwrt config set --mcp-mode readwrite
+openwrt config set --mcp-mode readwrite          # global default
+openwrt profiles update lab --mcp-mode readwrite # this profile only
 ```
 
-When MCP is connected, **do not** mutate the router with `openwrt … --yes` — that skips `mcp.mode`.
+When MCP is connected, **do not** mutate the router with `openwrt … --yes` — that skips `mcp.mode`. `openwrt mcp privilege` shows the same allow / deny table the server uses.
 
 ### Copy for agent
 
@@ -363,17 +449,23 @@ CONNECT MCP
   Reload MCP after saving.
 
 GOLDEN PATH
-  doctor → read-only inspect (system / network / passwall2)
-        → preview any write → user runs: openwrt config set --mcp-mode readwrite
+  profiles_current → doctor on that router
+        → read-only inspect (system / network / passwall2)
+        → another saved router: pass profile=<name> on that call only
+        → writes need that profile's mcp.mode=readwrite
+           (user: openwrt profiles update NAME --mcp-mode readwrite)
         → call a write tool only after a clear yes in chat
         → apply / restart is a second write (confirm again)
 
 RULES
   1) Prefer MCP tools when the openwrt server is connected.
      Read-only CLI fallback: openwrt -f json doctor|system status|network leases
-  2) mcp.mode defaults to readonly. Writes return mcp_readonly until readwrite.
-  3) When MCP is available, do not mutate with openwrt … --yes (bypasses the guard).
-  4) Never invent reboot, shutdown, backup restore, or user add/passwd/delete as MCP tools.
+  2) Omit profile to use the active profile. Do not run openwrt profiles use
+     to retarget later MCP calls. profiles_list / profiles_current omit passwords.
+  3) mcp.mode defaults to readonly. Writes return mcp_readonly until readwrite
+     on the profile that call names. config set --mcp-mode changes the global default.
+  4) When MCP is available, do not mutate with openwrt … --yes (bypasses the guard).
+  5) Never invent reboot, shutdown, backup restore, or user add/passwd/delete as MCP tools.
 
 Now: run doctor, then a read-only look at neighbors and PassWall2 status.
 Full skill: packaged as openwrt-ops (openwrt skill show).
@@ -387,7 +479,7 @@ UI language (tables, TUI, setup, help) resolves as:
 2. `language` in the config file
 3. System locale (`LANG` / `LC_ALL`) — Chinese locales get 简体中文, everything else English
 
-`openwrt setup` detects the system language, asks you to confirm, and writes it to the config file.
+`openwrt setup` detects the system language, asks you to confirm, and writes it to the config file. To add another language, see [Contributing a language](#contributing-a-language).
 
 ## Project Layout
 
@@ -413,38 +505,88 @@ flowchart LR
   HTTP --> Channels
 ```
 
+## Contributing a language
+
+UI strings live in `src/openwrt_cli/i18n/locales/`. One JSON file is one language. The file name, without `.json`, is the language code. `locales/*.json` is already packaged, and the loader picks up every file that does not start with `_`. No Python registration is required.
+
+Command names stay English. Translate the values only. MCP tool descriptions and the `openwrt-ops` skill are English and are not in these files.
+
+Russian (`ru`) is the example below. The same steps apply to any other language.
+
+1. Copy `en.json` to `src/openwrt_cli/i18n/locales/ru.json`. Use the ISO 639-1 primary code in lowercase. Name the file `ru.json`, not `ru_RU.json`. `LANG=ru_RU.UTF-8` is normalized to `ru`. Chinese is the only alias that is special-cased (`zh_CN`, `zh-Hans`, and `cn` all select `zh`).
+2. Translate the values. Keep every key, and keep placeholders such as `{name}`, `{error}`, and `{langs}`. A key that starts with `_` is ignored, so it does not count as a translation.
+3. Add the native name to **every** catalog, including `en.json`, `zh.json`, and `ru.json`:
+
+```json
+"setup.lang.ru": "Русский"
+```
+
+`openwrt setup` lists the languages it finds and shows this label. Help text that contains `{langs}` lists the codes on its own.
+
+4. Run `pytest tests/test_i18n.py`. Each catalog must have the same set of keys as `en.json`. A missing or extra key fails the test. At runtime a missing string would fall back to English, but the test does not allow a partial file.
+5. Try it:
+
+```bash
+openwrt -L ru doctor
+OPENWRT_LANG=ru openwrt config show
+```
+
+Then update the `en` / `zh` lists in this README so the new code is documented.
+
+`tests/test_i18n.py` treats `de_DE` as an unsupported locale. Adding `ru` does not affect that assertion. Adding `de` does: change the assertion in the same pull request.
+
 ## FAQ
 
-**SSH will not connect**
+**Q:** SSH will not connect. What should I check?
+
+**A:** Run setup again, then compare it with OpenSSH:
 
 ```bash
 openwrt setup
 ssh -v -p 22 root@192.168.1.1
 ```
 
-**Use a key instead of a password**
+**Q:** How do I use a key instead of a password?
+
+**A:** Install the public key on the router, then save the private-key path into the active profile:
 
 ```bash
 openwrt user key add --yes
 openwrt -H 192.168.1.1 -i ~/.ssh/id_ed25519_openwrt --save-config
 ```
 
-**Web admin only, no SSH**
+**Q:** The router has a web admin and no SSH. How do I connect?
+
+**A:** Choose the HTTP API in setup, then call commands over HTTPS:
 
 ```bash
 openwrt setup          # pick HTTP API
 openwrt --https system status
 ```
 
-**`firewall rules` fails over HTTP** — that path needs iptables. Use `--ssh`, or stick to UCI commands such as `firewall zones`.
+**Q:** Why does `firewall rules` fail over HTTP?
 
-**JSON / pipe errors on reboot, reload, restart** — add `--yes`.
+**A:** That path needs iptables. Use `--ssh`, or stay with UCI commands such as `firewall zones`.
 
-**`passwall2` is unknown / no TUI tab 7** — that feature shipped in **openwrt-cli &gt;= 1.1.0**. Upgrade the CLI, and install `luci-app-passwall2` on the router. `openwrt -v` prints the package version.
+**Q:** Why do reboot, reload, and restart fail in JSON or a pipe?
 
-**`openwrt` is not on PATH** — a `pip install --user` may have dropped the script in `python -m site --user-base` + `/bin`. Add that directory, or install with `pipx`.
+**A:** Those actions ask for confirmation on a terminal. Add `--yes` when there is no terminal.
 
-**Switch the UI language**
+**Q:** Why is `passwall2` unknown, or why is TUI tab 7 missing?
+
+**A:** That feature shipped in **openwrt-cli &gt;= 1.1.0**. Upgrade the CLI, and install `luci-app-passwall2` on the router. `openwrt -v` prints the package version.
+
+**Q:** Why is `openwrt` not on PATH?
+
+**A:** A `pip install --user` may have placed the script in `python -m site --user-base` + `/bin`. Add that directory, or install with `pipx`.
+
+**Q:** How do I use more than one router?
+
+**A:** `openwrt profiles use`, or `u` in the TUI, changes the active profile for the CLI, the TUI, and the default MCP target. An MCP tool can still pass `profile` for one call without changing that selection.
+
+**Q:** How do I switch the UI language?
+
+**A:** `-L` applies to one command. `config set` saves the choice:
 
 ```bash
 openwrt -L zh doctor

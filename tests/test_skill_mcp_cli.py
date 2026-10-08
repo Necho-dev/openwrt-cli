@@ -158,7 +158,7 @@ def test_mcp_overview_json():
     data = _parse(result.stdout)
     assert data["ok"] is True
     assert data["writes_config"] is False
-    assert data["next"] == ["json", "prompt", "path"]
+    assert data["next"] == ["json", "prompt", "path", "privilege"]
 
 
 def test_mcp_json_and_prompt():

@@ -13,4 +13,4 @@ def run_tui(ctx: typer.Context) -> None:
         device = app.client
     except DeviceConnectionError as e:
         fail(app, t("msg.connect_fail", error=e), error="connect")
-    OpenWrtTUI(device).run()
+    OpenWrtTUI(device, app.cfg).run()

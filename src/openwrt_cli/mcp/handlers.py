@@ -6,7 +6,7 @@ import os
 from datetime import datetime
 from typing import Any
 
-from openwrt_cli.core.config import public_config
+from openwrt_cli.core.config import ProfileError, mcp_current_profile, mcp_profiles, public_config
 from openwrt_cli.core.device import DeviceClient
 from openwrt_cli.core.errors import CapabilityError, DeviceCommandError
 from openwrt_cli.i18n import t
@@ -215,6 +215,18 @@ def passwall2_logs(
 def config_show(device: DeviceClient | None = None, *, cfg: dict | None = None, path: str | None = None) -> CommandResult:
     data = public_config(cfg or {}, path=path)
     return CommandResult.ok_data(data, transport=str((cfg or {}).get("transport") or ""), kind="config")
+
+
+def profiles_list(device: DeviceClient | None = None, *, cfg: dict | None = None) -> CommandResult:
+    return CommandResult.ok_data(mcp_profiles(cfg or {}), transport="", kind="profiles")
+
+
+def profiles_current(device: DeviceClient | None = None, *, cfg: dict | None = None) -> CommandResult:
+    try:
+        card = mcp_current_profile(cfg or {})
+    except ProfileError:
+        return CommandResult.fail(t("msg.no_profiles"), data={"error": "no_profiles"})
+    return CommandResult.ok_data(card, transport="", kind="profile")
 
 
 def network_set_hostname(device: DeviceClient, mac: str, name: str) -> CommandResult:

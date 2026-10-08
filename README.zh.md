@@ -65,7 +65,8 @@
 - **PassWall2** — 可选 `luci-app-passwall2`；**需要 openwrt-cli &gt;= 1.1.0**。读状态 / 节点 / ACL / 日志；可增删改节点与 ACL；探测到插件时出现 TUI 第 `7` 页
 - **同一套设备模型** — SSH 与 HTTP 共用 ubus / uci / shell 语义；缺能力就明确失败（不造假数据）
 - **Agent-ready** — `-f json` / `-f compact`，不依赖 TTY 或颜色
-- **MCP / Skills** — 见 [给 Agent 使用](#给-agent-使用)，可接到 Cursor、Claude Code、Codex。默认 `mcp.mode` 为 **readonly**
+- **多配置档** — 一份配置文件保存多台路由器。`openwrt profiles` 管理它们；TUI 右下角的主机名切换当前档
+- **MCP / Skills** — 见 [给 Agent 使用](#给-agent-使用)，可接到 Cursor、Claude Code、Codex。工具可用 `profile` 指定本次查询的配置档。默认 `mcp.mode` 为 **readonly**
 - **中英界面** — 命令名始终是英文
 
 ## 快速开始
@@ -153,6 +154,8 @@ OPENWRT_LIVE=1 poetry run pytest -m live  # 只读实机，读 ~/.openwrt-cli.ya
 
 成功和失败都是带 `ok` 的同一个对象。交互命令（`setup`、`tui`、`wizard`）拒绝 JSON（`error: interactive`）。破坏性操作在 TTY 会提问；管道或 JSON 模式下必须加 `--yes`，否则退出码 `2`。
 
+`profiles` 和 `config` 上的 `-H`、`-u`、`-p`、`--ssh`、`--http`、`--https` 是正在编辑的配置档字段。写在其他命令上时，它们只覆盖这一次进程的连接；除非同时带上 `--save-config`，否则不改写 `~/.openwrt-cli.yaml`。
+
 ### doctor / system / logs
 
 ```bash
@@ -227,6 +230,47 @@ openwrt backup create -o /tmp/bak.tar.gz
 openwrt backup restore /tmp/bak.tar.gz --yes
 ```
 
+### profiles / config
+
+已保存的路由器登录信息由 `openwrt profiles` 管理。`openwrt config` 是文件里其余的全局项：界面语言、全局 MCP 权限，以及当前使用哪一份配置档。它不显示主机和密码。`openwrt user` 是路由器上的系统用户，不是这份列表。
+
+```bash
+openwrt profiles list                  # 当前配置档以 ● 标出
+openwrt profiles show                  # 当前配置档，密码打码
+openwrt profiles show lab
+openwrt profiles add shop-rpa          # 在终端中填写主机和登录信息
+openwrt profiles add home -H 192.168.1.1 -u root --ssh
+openwrt profiles use lab               # 切换当前配置档
+openwrt profiles use                   # 方向键选择，按 Enter 确认
+openwrt profiles update home           # 逐步编辑，按 Enter 保留当前值
+openwrt profiles update lab --mcp-mode readwrite
+openwrt profiles update lab --mcp-mode inherit
+openwrt profiles del lab
+openwrt config show
+openwrt config path
+openwrt config set --language zh
+openwrt config set --mcp-mode readonly # 未单独设置权限的配置档使用该全局默认
+```
+
+`profiles` 的各子命令均支持 `--json`。`show` 省略名称时显示当前配置档。在终端中，`add`、`update`、`use` 会询问未提供的内容。允许删除最后一份配置档；语言和全局 MCP 权限保留。文件结构和从旧的单主机配置升级的方式见 [配置](#配置)。
+
+### mcp / skill
+
+这两组命令不连接路由器。`mcp` 打印客户端配置片段和权限表。`skill` 安装 `openwrt-ops` 操作说明。
+
+```bash
+openwrt mcp privilege                  # 各工具在 readonly / readwrite 下是否可用
+openwrt mcp json
+openwrt mcp json --client cursor
+openwrt mcp prompt
+openwrt mcp path
+openwrt skill detect
+openwrt skill install
+openwrt skill show
+```
+
+MCP 里会连接路由器的工具可带 `profile`，仅对该次调用生效。省略时使用当前配置档。见 [给 Agent 使用](#给-agent-使用)。
+
 ### setup / wizard / tui
 
 ```bash
@@ -236,35 +280,67 @@ openwrt wizard wifi            # user | hostname | wifi | lan | service
 openwrt tui
 ```
 
-TUI 快捷键：`1`–`6` 切页（有 `luci-app-passwall2` 时为第 `7` 页；**需要 openwrt-cli &gt;= 1.1.0**），`r` 刷新，`e` 编辑（Neighbors 主机名 / PassWall2 节点或 ACL），`f` 过滤，`q` 退出，`?` 帮助。
+TUI 快捷键：`1`–`6` 切页（有 `luci-app-passwall2` 时为第 `7` 页；**需要 openwrt-cli &gt;= 1.1.0**），`r` 刷新，`e` 编辑（Neighbors 主机名 / PassWall2 节点或 ACL），`u` 切换配置档（也可点击右下角的主机名），`f` 过滤，`q` 退出，`?` 帮助。
 
 ## 配置
 
-`openwrt setup` 或 `--save-config` 会写入 `~/.openwrt-cli.yaml`：
+`openwrt setup` 或 `--save-config` 会写入 `~/.openwrt-cli.yaml`。文件里每台路由器是一份命名配置档，另有一个 `active` 名称。CLI、TUI 和 MCP 默认都使用这个名称。主机、用户、端口、传输方式、密码和密钥属于配置档。`language` 和 `mcp.mode` 仍是全局配置。配置档可以单独设置 `mcp.mode`；未设置时继承全局默认。
+
+首次执行 `openwrt setup` 时先询问配置档名称（按 Enter 采用默认值 `home`），再填写主机和登录信息。之后再次执行时更新所填的那一份，其余配置档保持不变。普通命令上的 `-H`、`-u`、`-p` 只覆盖这一次进程的连接；除非同时带上 `--save-config`，否则不改写文件。`--save-config` 只更新当前配置档，不会新建。
+
+主机写在顶层的旧文件会当作名为 `default` 的配置档读入。读取本身不改写文件。下次保存时写成下面的结构，并保留语言和全局 MCP 权限。
 
 ```yaml
-host: 192.168.1.1
-user: root
-port: 22
-transport: ssh
-# password: 建议使用 SSH 密钥
-identity_file: ~/.ssh/id_ed25519_openwrt
+language: zh
+mcp:
+  mode: readonly          # 全局默认
+active: home
+profiles:
+  - name: home
+    host: 192.168.1.1
+    user: root
+    port: 22
+    transport: ssh
+    identity_file: ~/.ssh/id_ed25519_openwrt
+  - name: lab
+    host: 10.0.0.1
+    user: root
+    transport: http
+    scheme: https
+    port: 443
+    verify_ssl: false
+    mcp:
+      mode: readwrite     # 只覆盖这个配置档
 ```
 
 ```bash
-openwrt config show
+openwrt config show          # 语言、全局 mcp.mode、当前配置档、生效权限
 openwrt config path
-openwrt config set -H 192.168.1.1 --ssh
 openwrt config set --language zh
-openwrt config set --mcp-mode readonly     # 默认
+openwrt config set --mcp-mode readonly     # 全局默认
 openwrt config set --mcp-mode readwrite    # 允许 MCP 写入（须用户确认）
+openwrt profiles list
+openwrt profiles show                  # 当前配置档，密码打码
+openwrt profiles show lab
+openwrt profiles add shop-rpa          # 逐步填写主机和登录信息
+openwrt profiles add home -H 192.168.1.1 -u root --ssh -i ~/.ssh/id_ed25519_openwrt
+openwrt profiles add lab -H 10.0.0.1 --https --mcp-mode readwrite
+openwrt profiles use lab
+openwrt profiles use                 # 上下键选择，Enter 确认
+openwrt profiles update                 # 上下键选择，再逐步编辑
+openwrt profiles update home            # 逐步编辑，按 Enter 保留当前值
+openwrt profiles update home --name house
+openwrt profiles update lab --mcp-mode inherit   # 重新跟随全局默认
+openwrt profiles del lab
 ```
+
+`profiles add` 必须指定配置档名称，由用户填写。`-u` 是这台路由器上的登录用户名，不是配置档名称。`openwrt user` 仍然是路由器上的系统用户。`profiles show` 和 `profiles list --json` 中的密码打码。`profiles del` 可以删除最后一份配置档；语言和全局 MCP 权限保留，之后需要先添加配置档才能连接。TUI 中按 `u`，或点击右下角的主机，会在新连接成功后切换当前配置档。
 
 ## 给 Agent 使用
 
 人用 CLI / TUI。助手靠两样东西干活：**Skill**（`openwrt-ops`，操作说明）和 **MCP**（`openwrt-mcp`，真正调路由器的工具）。配好之后，可以直接问「路由器还好吗」「谁在局域网」「PassWall2 什么状态」；改配置必须你点头。密码只存在本机 yaml 里，不用贴进对话。
 
-可以自己按下面三步配，也可以把本节末尾的英文说明贴给助手，让它带着做。
+可以按下面三步配置，也可以把本节末尾的英文说明贴给助手，让它按步骤完成。
 
 ### 1. 先连上路由器
 
@@ -288,6 +364,7 @@ openwrt skill install --yes      # 装到所有已探测客户端（用户级）
 
 ```bash
 pip install 'openwrt-cli[mcp]'   # 若已用 install.sh 安装，可跳过
+openwrt mcp privilege            # 当前 MCP 权限下各工具是否可用
 openwrt mcp json                 # 通用片段
 openwrt mcp json --client cursor
 openwrt mcp path                 # 各客户端配置文件路径
@@ -319,18 +396,27 @@ claude mcp add openwrt -- openwrt-mcp
 
 | | 工具 |
 |---|---|
-| **先探活** | `doctor` · `config_show`（密码已打码） |
+| **先探活** | `profiles_current` · `profiles_list` · `doctor` · `config_show`（不含密码） |
 | **只读** | `system_status` · `network_overview` · `network_neighbors` · `network_leases` · `firewall_view` · `service_list` · `passwall2_status` · `passwall2_nodes`（不 Ping）· `passwall2_logs` · `logs_read` |
 | **写入** | 仅当 `mcp.mode=readwrite`，并且你在对话里明确同意（如 `wifi_set`、`lan_set`、PassWall2 节点/ACL、`service_action`） |
 | **不要走 MCP** | 重启、关机、恢复备份、用户增删改密 — 请在自己的终端执行（例如 `openwrt system reboot --yes`） |
 
-`mcp.mode` 默认是 **readonly**。未改之前，写入工具会返回 `mcp_readonly`：
+### 助手连的是哪一台
+
+`profiles_current` 是当前配置档。`profiles_list` 列出已保存的名称、目标和生效权限。这两个工具不连接路由器，也不返回密码或密钥路径。
+
+会连接路由器的工具可带可选参数 `profile`。省略时使用当前配置档；指定名称只对该次调用生效。返回值带有 `profile`，同一轮里两台路由器的结果可以分开。这不会改变 CLI 和 TUI 里选中的配置档。不要让助手执行 `openwrt profiles use` 去改变后续调用的目标。
+
+不同配置档可以同时查询。只有**该次调用所点名的配置档**生效权限为 `readwrite` 时，写入才会放行。
+
+`mcp.mode` 默认是 **readonly**。未改之前，写入工具会返回 `mcp_readonly`，需要由用户修改：
 
 ```bash
-openwrt config set --mcp-mode readwrite
+openwrt config set --mcp-mode readwrite            # 全局默认
+openwrt profiles update lab --mcp-mode readwrite   # 只改这一份配置档
 ```
 
-MCP 已经连上时，**不要**再用 `openwrt … --yes` 改路由器，那会绕过 `mcp.mode`。
+MCP 已经连上时，**不要**再用 `openwrt … --yes` 改路由器，那会绕过 `mcp.mode`。`openwrt mcp privilege` 显示的是服务实际使用的允许 / 拒绝表。
 
 ### 给助手的安装说明
 
@@ -360,17 +446,23 @@ CONNECT MCP
   Reload MCP after saving.
 
 GOLDEN PATH
-  doctor → read-only inspect (system / network / passwall2)
-        → preview any write → user runs: openwrt config set --mcp-mode readwrite
+  profiles_current → doctor on that router
+        → read-only inspect (system / network / passwall2)
+        → another saved router: pass profile=<name> on that call only
+        → writes need that profile's mcp.mode=readwrite
+           (user: openwrt profiles update NAME --mcp-mode readwrite)
         → call a write tool only after a clear yes in chat
         → apply / restart is a second write (confirm again)
 
 RULES
   1) Prefer MCP tools when the openwrt server is connected.
      Read-only CLI fallback: openwrt -f json doctor|system status|network leases
-  2) mcp.mode defaults to readonly. Writes return mcp_readonly until readwrite.
-  3) When MCP is available, do not mutate with openwrt … --yes (bypasses the guard).
-  4) Never invent reboot, shutdown, backup restore, or user add/passwd/delete as MCP tools.
+  2) Omit profile to use the active profile. Do not run openwrt profiles use
+     to retarget later MCP calls. profiles_list / profiles_current omit passwords.
+  3) mcp.mode defaults to readonly. Writes return mcp_readonly until readwrite
+     on the profile that call names. config set --mcp-mode changes the global default.
+  4) When MCP is available, do not mutate with openwrt … --yes (bypasses the guard).
+  5) Never invent reboot, shutdown, backup restore, or user add/passwd/delete as MCP tools.
 
 Now: run doctor, then a read-only look at neighbors and PassWall2 status.
 Full skill: packaged as openwrt-ops (openwrt skill show).
@@ -384,7 +476,7 @@ Full skill: packaged as openwrt-ops (openwrt skill show).
 2. 配置文件里的 `language`
 3. 系统 locale（`LANG` / `LC_ALL`）— 中文环境用简体中文，其余默认英文
 
-`openwrt setup` 会检测系统语言并让你确认，然后写入配置文件。
+`openwrt setup` 会检测系统语言并让你确认，然后写入配置文件。新增一种语言的步骤见 [贡献一种语言](#贡献一种语言)。
 
 ## 目录结构
 
@@ -410,38 +502,88 @@ flowchart LR
   HTTP --> Channels
 ```
 
+## 贡献一种语言
+
+界面文案在 `src/openwrt_cli/i18n/locales/`。一个 JSON 文件对应一种语言，去掉 `.json` 后的文件名就是语言代码。`locales/*.json` 已列入安装包，加载时会读入每个不以 `_` 开头的文件，无需再在 Python 中登记。
+
+命令名保持英文，只翻译各键的值。MCP 工具说明和 `openwrt-ops` 技能文本是英文，不在这些文件中。
+
+下面以俄文（`ru`）为例，其他语言按同样步骤处理。
+
+1. 将 `en.json` 复制为 `src/openwrt_cli/i18n/locales/ru.json`。文件名使用小写的 ISO 639-1 主代码，写 `ru.json`，不要写 `ru_RU.json`。`LANG=ru_RU.UTF-8` 会规范为 `ru`。中文是唯一的特例：`zh_CN`、`zh-Hans` 和 `cn` 都会选用 `zh`。
+2. 翻译各键的值。保留全部键名，以及 `{name}`、`{error}`、`{langs}` 这类占位符。以 `_` 开头的键会被忽略，不能当作译文。
+3. 在**每一份**语言包中加入该语言的自称，包括 `en.json`、`zh.json` 和 `ru.json`：
+
+```json
+"setup.lang.ru": "Русский"
+```
+
+`openwrt setup` 会列出已加载的语言，并显示这个名称。含有 `{langs}` 的帮助文本会自行列出语言代码。
+
+4. 运行 `pytest tests/test_i18n.py`。每份语言包的键集合必须与 `en.json` 相同，缺键或多键都会失败。运行时缺少的字符串会退回英文，但测试不接受不完整的文件。
+5. 验收：
+
+```bash
+openwrt -L ru doctor
+OPENWRT_LANG=ru openwrt config show
+```
+
+随后更新本 README 里写有 `en` / `zh` 的位置，把新的语言代码补上。
+
+`tests/test_i18n.py` 将 `de_DE` 视为尚不支持的区域设置。新增 `ru` 时不必改这条断言。新增 `de` 时，须在同一变更中修改该断言。
+
 ## 常见问题
 
-**SSH 连不上**
+**Q:** SSH 无法连接时，应检查什么？
+
+**A:** 重新执行 setup，再用 OpenSSH 对照同一次连接：
 
 ```bash
 openwrt setup
 ssh -v -p 22 root@192.168.1.1
 ```
 
-**想用密钥而不是密码**
+**Q:** 如何改用密钥登录，而不使用密码？
+
+**A:** 先把公钥装到路由器上，再把私钥路径写入当前配置档：
 
 ```bash
 openwrt user key add --yes
 openwrt -H 192.168.1.1 -i ~/.ssh/id_ed25519_openwrt --save-config
 ```
 
-**只有 Web 管理、没有 SSH**
+**Q:** 路由器只有 Web 管理、没有 SSH 时，如何连接？
+
+**A:** 在 setup 中选择 HTTP API，之后通过 HTTPS 执行命令：
 
 ```bash
-openwrt setup          # 选 HTTP API
+openwrt setup          # 选择 HTTP API
 openwrt --https system status
 ```
 
-**HTTP 下 `firewall rules` 失败** — 这条路径需要 iptables。改用 `--ssh`，或只用 `firewall zones` 这类 UCI 命令。
+**Q:** 为什么通过 HTTP 执行 `firewall rules` 会失败？
 
-**JSON / 管道里执行 reboot、reload、restart 报错** — 加上 `--yes`。
+**A:** 该命令需要 iptables。请改用 `--ssh`，或只使用 `firewall zones` 这类 UCI 命令。
 
-**没有 `passwall2` 命令 / TUI 没有第 7 页** — 该能力从 **openwrt-cli &gt;= 1.1.0** 起提供。请升级 CLI，并在路由器上安装 `luci-app-passwall2`。`openwrt -v` 可查看当前版本。
+**Q:** 为什么在 JSON 或管道中执行 reboot、reload、restart 会报错？
 
-**PATH 里找不到 `openwrt`** — `pip install --user` 可能把脚本装到 `python -m site --user-base` + `/bin`。把该目录加入 PATH，或改用 `pipx`。
+**A:** 这些操作在终端中会要求确认。没有终端时请加上 `--yes`。
 
-**切换界面语言**
+**Q:** 为什么没有 `passwall2` 命令，或 TUI 没有第 7 页？
+
+**A:** 该能力从 **openwrt-cli &gt;= 1.1.0** 起提供。请升级 CLI，并在路由器上安装 `luci-app-passwall2`。`openwrt -v` 可查看当前版本。
+
+**Q:** 为什么 PATH 中找不到 `openwrt`？
+
+**A:** `pip install --user` 可能把脚本安装到 `python -m site --user-base` + `/bin`。请将该目录加入 PATH，或改用 `pipx` 安装。
+
+**Q:** 如何使用多台路由器？
+
+**A:** `openwrt profiles use`，或在 TUI 中按 `u`，会切换 CLI、TUI 以及 MCP 默认使用的配置档。MCP 工具仍可在单次调用中传入 `profile`，且不改变这一选择。
+
+**Q:** 如何切换界面语言？
+
+**A:** `-L` 只作用于这一次命令。`config set` 会保存所选语言：
 
 ```bash
 openwrt -L zh doctor

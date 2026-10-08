@@ -5,7 +5,7 @@ import os
 import typer
 from rich.console import Console
 
-from openwrt_cli.core.config import ConfigManager, mcp_mode, normalize_config
+from openwrt_cli.core.config import ConfigManager, ProfileError, mcp_mode, upsert_profile, validate_profile_name
 from openwrt_cli.core.connection import open_connection
 from openwrt_cli.core.errors import DeviceConnectionError
 from openwrt_cli.i18n import detect_system_language, normalize_language, set_language, t
@@ -46,6 +46,25 @@ def _ask_language(console: Console, cfg: dict) -> str:
     return lang
 
 
+_FIRST_PROFILE_NAME = "home"
+
+
+def profile_prompt(cfg: dict) -> tuple[bool, str]:
+    """First run suggests a name. Later runs keep the active profile."""
+    profiles = [item for item in (cfg.get("profiles") or []) if isinstance(item, dict) and item.get("name")]
+    if not profiles:
+        return True, _FIRST_PROFILE_NAME
+    return False, str(cfg.get("active") or profiles[0].get("name") or "")
+
+
+def _valid_profile_name(value: str) -> bool:
+    try:
+        validate_profile_name(value)
+    except ProfileError:
+        return False
+    return True
+
+
 def _lang_label(code: str) -> str:
     key = f"setup.lang.{code}"
     label = t(key)
@@ -61,6 +80,17 @@ def run_setup(console: Console, config_path: str | None = None) -> None:
     language = _ask_language(console, cfg)
     console.print()
     console.print(f"[accent]{t('setup.title')}[/accent]")
+    first_profile, name_default = profile_prompt(cfg)
+    if first_profile:
+        console.print(f"[muted]{t('setup.first')}[/muted]")
+    profile_name = ask_text(
+        t("setup.profile"),
+        default=name_default,
+        validate=lambda value: True if _valid_profile_name(value) else t("err.profile_name"),
+    )
+    if not profile_name:
+        typer.secho(t("setup.cancelled"), err=True)
+        raise typer.Exit(1)
     host = ask_text(t("setup.host"), default=cfg.get("host") or "192.168.1.1")
     if not host:
         typer.secho(t("setup.cancelled"), err=True)
@@ -125,21 +155,18 @@ def run_setup(console: Console, config_path: str | None = None) -> None:
         )
         port = int(port_str) if port_str else 22
 
-    new_cfg = {k: v for k, v in cfg.items() if k not in ("_config_path", "http_port")}
-    new_cfg.update({"host": host, "user": user, "transport": transport, "port": port, "language": language})
+    fields: dict = {"host": host, "user": user, "transport": transport, "port": port}
     if transport == "http":
-        new_cfg["scheme"] = scheme
-        new_cfg["verify_ssl"] = False
-        new_cfg.pop("identity_file", None)
-    else:
-        new_cfg.pop("scheme", None)
-        new_cfg.pop("verify_ssl", None)
+        fields["scheme"] = scheme
+        fields["verify_ssl"] = False
     if password:
-        new_cfg["password"] = password
+        fields["password"] = password
     if identity_file:
-        new_cfg["identity_file"] = os.path.expanduser(identity_file)
-
-    mgr.save(new_cfg)
+        fields["identity_file"] = os.path.expanduser(identity_file)
+    cfg["language"] = language
+    upsert_profile(cfg, profile_name, fields, activate=True)
+    mgr.save(cfg)
+    new_cfg = cfg
     console.print(f"[muted]{t('setup.saved', path=mgr.config_path)}[/muted]")
 
     hostname = ""
@@ -151,6 +178,7 @@ def run_setup(console: Console, config_path: str | None = None) -> None:
             client.close()
         rows = [
             (t("cfg.authenticated"), t("label.yes")),
+            (t("col.profile"), profile_name),
             (t("cfg.transport"), transport),
             (t("cfg.host"), host),
             (t("cfg.user"), user),
@@ -164,7 +192,7 @@ def run_setup(console: Console, config_path: str | None = None) -> None:
                 rows.append((t("cfg.identity"), identity_file))
         if hostname:
             rows.append((t("cfg.hostname"), hostname))
-        rows.append((t("cfg.mcp_mode"), mcp_mode(normalize_config(new_cfg))))
+        rows.append((t("cfg.mcp_mode"), mcp_mode(new_cfg)))
         console.print()
         console.print(setup_complete_panel(rows, [
             "openwrt doctor",

@@ -11,8 +11,9 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
-from textual.widgets import Button, DataTable, Footer, Input, Link, RichLog, Static, TabbedContent, TabPane
+from textual.widgets import Button, DataTable, Footer, Input, Link, OptionList, RichLog, Static, TabbedContent, TabPane
 from textual.widgets._footer import FooterKey
+from textual.widgets.option_list import Option
 
 from openwrt_cli.core.device import DeviceClient
 from openwrt_cli.services.monitor import MonitorService
@@ -31,6 +32,7 @@ from openwrt_cli.tui.screens.passwall2 import (
     AclFormModal,
     AclLogModal,
     NodeFormModal,
+    PassWall2Pane,
     acl_row,
     format_acl_detail,
     format_node_detail,
@@ -145,6 +147,81 @@ def _mem_value(used_pct: float, avail: float, total: float) -> Text:
 
 def _plain(cell) -> str:
     return cell.plain if isinstance(cell, Text) else str(cell)
+
+
+def _same_cell(old, new) -> bool:
+    if isinstance(old, Text) or isinstance(new, Text):
+        left = old if isinstance(old, Text) else Text(str(old))
+        right = new if isinstance(new, Text) else Text(str(new))
+        if left.plain != right.plain or left.justify != right.justify or len(left.spans) != len(right.spans):
+            return False
+        return all(
+            a.start == b.start and a.end == b.end and a.style == b.style
+            for a, b in zip(left.spans, right.spans)
+        )
+    return old == new
+
+
+def _restore_table_scroll(table: DataTable, x: float, y: float) -> None:
+    """Put the viewport back after a cursor move.
+
+    DataTable scrolls the cursor into view, and that scroll can be deferred until
+    after the next refresh. Pin once now and once more after that deferred scroll.
+    """
+
+    def pin() -> None:
+        table.scroll_to(x, y, animate=False, immediate=True, force=True)
+
+    pin()
+
+    def pin_after_deferred_scroll() -> None:
+        table.call_after_refresh(pin)
+
+    table.call_after_refresh(pin_after_deferred_scroll)
+
+
+def repaint_datatable(table: DataTable, rows: list[tuple], *, follow_row: int | None = None) -> None:
+    """Refresh a DataTable without clearing it.
+
+    ``DataTable.clear()`` resets the scroll offset and repaints an empty table, which
+    flashes the scrollbar. Cells are written in place instead. ``follow_row`` moves the
+    cursor to that index; an existing viewport is kept where the user left it.
+    """
+    columns = list(table.ordered_columns)
+    if not columns:
+        return
+    width = len(columns)
+    col_keys = [column.key for column in columns]
+    existing = [row.key for row in table.ordered_rows]
+    incoming = [tuple(row[:width]) for row in rows]
+    had_rows = bool(existing)
+    scroll_x, scroll_y = table.scroll_x, table.scroll_y
+    cursor_before = table.cursor_coordinate
+
+    with table.app.batch_update():
+        limit = min(len(existing), len(incoming))
+        for index in range(limit):
+            row_key = existing[index]
+            for col_index, value in enumerate(incoming[index]):
+                column_key = col_keys[col_index]
+                current = table.get_cell(row_key, column_key)
+                if _same_cell(current, value):
+                    continue
+                widen = _display_width(_plain(value)) > columns[col_index].content_width
+                table.update_cell(row_key, column_key, value, update_width=widen)
+        for row in incoming[len(existing):]:
+            table.add_row(*row)
+        for row_key in existing[len(incoming):]:
+            table.remove_row(row_key)
+
+    cursor_moved = table.cursor_coordinate != cursor_before
+    if follow_row is not None and table.row_count:
+        target = max(0, min(follow_row, table.row_count - 1))
+        if table.cursor_row != target:
+            table.move_cursor(row=target, scroll=not had_rows)
+            cursor_moved = True
+    if had_rows and cursor_moved:
+        _restore_table_scroll(table, scroll_x, scroll_y)
 
 
 def _status_up(up) -> Text:
@@ -364,6 +441,7 @@ def _conn_status(device) -> Text:
     t.append(f"  {user}@{host}", style="#f2f6fb")
     if port is not None:
         t.append(f":{port}", style="dim")
+    t.append(" ▾", style="dim")
     return t
 
 
@@ -642,6 +720,62 @@ class HostnameModal(ModalScreen[str | None]):
         self.dismiss(None)
 
 
+class ConnStatus(Static):
+    """Footer connection label. Click to switch the active profile."""
+
+    def on_click(self, event: events.Click) -> None:
+        event.stop()
+        self.app.action_switch_account()
+
+
+class AccountSwitchModal(ModalScreen[str | None]):
+    CSS = """
+    AccountSwitchModal { align: center middle; }
+    #acct-box {
+        width: 72;
+        max-width: 90%;
+        height: auto;
+        max-height: 80%;
+        background: #12283f;
+        border: tall #4c8dff;
+        padding: 1 2;
+    }
+    #acct-title { height: 2; color: #7ec8ff; text-style: bold; content-align: left middle; }
+    #acct-list { height: auto; max-height: 16; background: #12283f; }
+    """
+    BINDINGS = [Binding("escape", "cancel", _("action.cancel"), show=False)]
+
+    def __init__(self, profiles: list[dict], active: str | None) -> None:
+        super().__init__()
+        self.profiles = profiles
+        self.active = active
+
+    def compose(self) -> ComposeResult:
+        from openwrt_cli.core.config import profile_target
+
+        with Vertical(id="acct-box"):
+            yield Static(t("profiles.switch_title"), id="acct-title")
+            options = []
+            for profile in self.profiles:
+                mark = "● " if profile.get("name") == self.active else "  "
+                label = f"{mark}{profile.get('name')}   {profile_target(profile)}"
+                options.append(Option(label, id=str(profile.get("name") or "")))
+            yield OptionList(*options, id="acct-list")
+
+    def on_mount(self) -> None:
+        listing = self.query_one(OptionList)
+        for index, profile in enumerate(self.profiles):
+            if profile.get("name") == self.active:
+                listing.highlighted = index
+                break
+
+    def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
+        self.dismiss(str(event.option.id) if event.option.id is not None else None)
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+
 class OpenWrtTUI(App):
     """Dashboard: logo + KPIs, Overview embeds Load / Bandwidth / Connections."""
 
@@ -736,6 +870,7 @@ class OpenWrtTUI(App):
         background: $footer-background;
         color: $footer-description-foreground;
     }
+    #conn-status:hover { text-style: underline; }
     #footer-ver {
         width: auto;
         height: 1;
@@ -782,11 +917,13 @@ class OpenWrtTUI(App):
         Binding("e", "edit_or_enable", _("action.edit"), show=False),
         Binding("d", "svc_action('disable')", _("action.disable"), show=False),
         Binding("question_mark", "help", _("action.help")),
+        Binding("u", "switch_account", _("action.switch_profile")),
     ]
 
-    def __init__(self, device: DeviceClient):
+    def __init__(self, device: DeviceClient, cfg: dict | None = None):
         super().__init__()
         self.device = device
+        self.cfg = cfg if isinstance(cfg, dict) else {}
         self._l1: deque[float] = deque(maxlen=WINDOW)
         self._l5: deque[float] = deque(maxlen=WINDOW)
         self._l15: deque[float] = deque(maxlen=WINDOW)
@@ -908,7 +1045,7 @@ class OpenWrtTUI(App):
             with Horizontal(id="footer-edit"):
                 yield _footer_edit_key()
             yield _footer()
-            yield Static(_conn_status(self.device), id="conn-status")
+            yield ConnStatus(_conn_status(self.device), id="conn-status")
             yield Static(display_version(), id="footer-ver")
             yield Link(GITHUB_ICON, url=REPO_URL, tooltip=REPO_URL, id="footer-gh")
 
@@ -1026,6 +1163,156 @@ class OpenWrtTUI(App):
             self.notify(t("help.pw2.keys"))
         else:
             self.notify(t("help.generic"))
+
+    def action_switch_account(self) -> None:
+        if self._typing_filter() or len(self.screen_stack) > 1:
+            return
+        profiles = [item for item in (self.cfg.get("profiles") or []) if isinstance(item, dict)]
+        if not profiles:
+            self.notify(t("msg.no_profiles"), severity="warning")
+            return
+        self.push_screen(AccountSwitchModal(profiles, self.cfg.get("active")), self._on_account_picked)
+
+    def _on_account_picked(self, name: str | None) -> None:
+        if not name or name == self.cfg.get("active"):
+            return
+        self._switch_account(name)
+
+    @work(thread=True, exclusive=True, group="switch-account")
+    def _switch_account(self, name: str) -> None:
+        from openwrt_cli.core.config import ConfigManager, ProfileError, activate_profile, connection_for
+        from openwrt_cli.core.connection import open_connection
+
+        try:
+            trial = connection_for(self.cfg, name)
+            device = open_connection(trial)
+            apps = probe_optional_apps(device)
+        except Exception as exc:
+            self.call_from_thread(self.notify, t("msg.connect_fail", error=exc), severity="error")
+            return
+
+        def apply() -> None:
+            previous = self.cfg.get("active")
+            try:
+                activate_profile(self.cfg, name)
+                ConfigManager(self.cfg.get("_config_path")).save(self.cfg)
+            except (ProfileError, OSError, Exception) as exc:
+                if previous:
+                    self.cfg["active"] = previous
+                try:
+                    activate_profile(self.cfg, str(previous)) if previous else None
+                except ProfileError:
+                    pass
+                try:
+                    device.close()
+                except Exception:
+                    pass
+                self.notify(str(exc), severity="error")
+                return
+            old = self.device
+            self.device = device
+            try:
+                old.close()
+            except Exception:
+                pass
+            self._reset_after_switch()
+            self._sync_optional_tabs(apps)
+            self.query_one("#conn-status", ConnStatus).update(_conn_status(self.device))
+            self.refresh_data()
+            self.refresh_logs()
+            if self._pane == "passwall2" and self._pw2:
+                self._pw2_reload()
+            self.notify(t("msg.profile_activated", name=name))
+
+        self.call_from_thread(apply)
+
+    def _reset_after_switch(self) -> None:
+        for seq in (self._l1, self._l5, self._l15, self._rx, self._tx, self._udp, self._tcp, self._other):
+            seq.clear()
+        self._last_rx = None
+        self._last_tx = None
+        self._last_ts = None
+        self._neigh_snap = {}
+        self._neigh_ts = None
+        self._filter = ""
+        self._net_rows = []
+        self._lease_rows = []
+        self._lease_mode = "arp"
+        self._neigh_by_ip = {}
+        self._neigh_by_mac = {}
+        self._bandix_mac = ""
+        self._bandix_ip = ""
+        self._lease_cursor_ip = ""
+        self._bandix_ignore_highlight = False
+        self._bandix_metrics_ready = False
+        self._svc_rows = []
+        self._proc_rows = []
+        self._route_rows = []
+        self._rule_rows = []
+        self._log_entries = []
+        self._log_keys = set()
+        self._log_ready = False
+        self._counts = {}
+        self._last_fail_note = 0.0
+        self._svc_focus = ""
+        self._svc_showing = ""
+        self._proc_by_pid = {}
+        self._proc_focus = ""
+        self._proc_detail_pid = ""
+        self._session_lost = False
+        self._pw2_sub = "pw2-nodes"
+        self._pw2_node_rows = []
+        self._pw2_nodes = []
+        self._pw2_node_by_id = {}
+        self._pw2_sub_rows = []
+        self._pw2_sub_by_id = {}
+        self._pw2_acl_rows = []
+        self._pw2_acl_by_id = {}
+        self._pw2_rule_rows = []
+        self._pw2_rule_by_id = {}
+        self._pw2_focus_node = ""
+        self._pw2_focus_acl = ""
+        self._pw2_focus_sub = ""
+        self._pw2_focus_rule = ""
+        self._pw2_detection = "off"
+        self._pw2_pending_apply = False
+        self.query_one("#filter-input", Input).value = ""
+        self.query_one("#filter-bar").display = False
+        try:
+            self.query_one("#log-view", RichLog).clear()
+        except Exception:
+            pass
+        for tid in ("net-table", "lease-table", "svc-table", "proc-table", "route-table", "rule-table"):
+            try:
+                self.query_one(f"#{tid}", DataTable).clear()
+            except Exception:
+                pass
+
+    def _sync_optional_tabs(self, apps) -> None:
+        self._optional = list(apps)
+        want = any(getattr(app, "id", "") == "passwall2" for app in self._optional)
+        tabs = self.query_one("#tabs", TabbedContent)
+        if want and not self._pw2:
+            tabs.add_pane(PassWall2Pane())
+            self._pw2 = True
+            self.set_timer(0.05, self._ensure_pw2_tables)
+        elif self._pw2 and not want:
+            if self._pane == "passwall2":
+                tabs.active = "overview"
+                self._pane = "overview"
+            tabs.remove_pane("passwall2")
+            self._pw2 = False
+            self._update_footer_edit()
+
+    def _ensure_pw2_tables(self) -> None:
+        try:
+            table = self.query_one("#pw2-node-table", DataTable)
+        except Exception:
+            self.set_timer(0.05, self._ensure_pw2_tables)
+            return
+        if table.columns:
+            return
+        setup_passwall2_tables(self)
 
     def on_input_changed(self, event: Input.Changed) -> None:
         if event.input.id != "filter-input":
@@ -1675,20 +1962,17 @@ class OpenWrtTUI(App):
             keep, keep_col = self._pw2_focus_acl, 0
         elif table_id == "pw2-sub-table":
             keep, keep_col = self._pw2_focus_sub, 0
-        table.clear()
-        shown = 0
-        keep_row = 0
+        visible: list[tuple] = []
+        follow = None
         for row in rows:
             if not self._row_match(row):
                 continue
-            table.add_row(*row)
-            if keep and len(row) > keep_col and _plain(row[keep_col]) == keep:
-                keep_row = shown
-            shown += 1
-        self._counts[table_id] = (shown, len(rows))
+            if keep and follow is None and len(row) > keep_col and _plain(row[keep_col]) == keep:
+                follow = len(visible)
+            visible.append(row)
+        repaint_datatable(table, visible, follow_row=follow)
+        self._counts[table_id] = (len(visible), len(rows))
         self._update_filter_count()
-        if table_id in {"svc-table", "proc-table", "lease-table", "pw2-node-table", "pw2-acl-table", "pw2-sub-table", "pw2-rule-table"} and shown:
-            table.move_cursor(row=keep_row)
         if table_id == "lease-table":
             self.call_after_refresh(self._resume_bandix_highlight)
 

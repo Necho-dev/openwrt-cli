@@ -27,6 +27,7 @@ from openwrt_cli.commands.setup import run_setup
 from openwrt_cli.commands.system import system_app
 from openwrt_cli.commands.tui import run_tui
 from openwrt_cli.commands.user import user_app
+from openwrt_cli.commands.profiles_cmd import profiles_app
 from openwrt_cli.commands.wizard_cmd import (
     run_wizard_menu,
     wizard_hostname,
@@ -37,7 +38,7 @@ from openwrt_cli.commands.wizard_cmd import (
 )
 from openwrt_cli.commands.common import fail, get_app, refuse_interactive
 from openwrt_cli.context import AppContext
-from openwrt_cli.core.config import MASKED_SECRET, ConfigManager
+from openwrt_cli.core.config import MASKED_SECRET, ConfigManager, ProfileError, persist_connection_overlay
 from openwrt_cli.services.result import CommandResult
 from openwrt_cli.ui.console import get_console
 from openwrt_cli.ui.render import emit
@@ -51,11 +52,42 @@ _VALUE_OPTS = {
     "-H", "--host", "-u", "--user", "-p", "--port", "-i", "--identity-file",
     "--password", "--config", "--format", "-L", "--language",
 }
+_CONNECT_FLAGS = {"--https", "--http", "--ssh"}
+_CONNECT_VALUES = {
+    "-H", "--host", "-u", "--user", "-p", "--port", "-i", "--identity-file", "--password",
+}
+# These commands own connection flags. Hoisting them would hide a rejected `config set -H`
+# inside the root overlay, and would steal `profiles add -H` from the subcommand.
+_LOCAL_CONNECT_COMMANDS = {"profiles", "config"}
+
+
+def _leading_command(argv: list[str]) -> str | None:
+    i = 0
+    while i < len(argv):
+        tok = argv[i]
+        if tok == "--":
+            return None
+        name = tok.split("=", 1)[0]
+        if name in _FLAG_OPTS:
+            i += 1
+            continue
+        if name in _VALUE_OPTS:
+            i += 1 if "=" in tok else 2
+            continue
+        if _is_format_short(tok, argv[i + 1] if i + 1 < len(argv) else None):
+            if "=" in tok or (tok != "-f" and tok.startswith("-f") and not tok.startswith("--")):
+                i += 1
+            else:
+                i += 2
+            continue
+        return tok
+    return None
 
 
 def hoist_global_options(argv: list[str]) -> list[str]:
     flags: list[str] = []
     rest: list[str] = []
+    keep_connect = _leading_command(argv) in _LOCAL_CONNECT_COMMANDS
     i = 0
     while i < len(argv):
         tok = argv[i]
@@ -63,6 +95,21 @@ def hoist_global_options(argv: list[str]) -> list[str]:
             rest.extend(argv[i:])
             break
         name = tok.split("=", 1)[0]
+        if keep_connect and name in _CONNECT_FLAGS:
+            rest.append(tok)
+            i += 1
+            continue
+        if keep_connect and name in _CONNECT_VALUES:
+            if "=" in tok:
+                rest.append(tok)
+                i += 1
+            elif i + 1 < len(argv):
+                rest.extend([tok, argv[i + 1]])
+                i += 2
+            else:
+                rest.append(tok)
+                i += 1
+            continue
         if name in _FLAG_OPTS:
             flags.append(tok)
             i += 1
@@ -199,6 +246,7 @@ app.add_typer(qos_app, name="qos", help=_("help.qos"))
 app.add_typer(service_app, name="service", help=_("help.service"))
 app.add_typer(pw2_app, name="passwall2", help=_("help.passwall2"))
 app.add_typer(user_app, name="user", help=_("help.user"))
+app.add_typer(profiles_app, name="profiles", help=_("help.profiles"))
 app.add_typer(backup_app, name="backup", help=_("help.backup"))
 app.add_typer(system_app, name="system", help=_("help.system"))
 app.add_typer(config_app, name="config", help=_("help.config"))
@@ -253,14 +301,28 @@ def root(
         cfg["language"] = resolved
     elif cfg.get("language"):
         set_language(cfg.get("language"))
+    explicit: dict = {}
     if host:
+        explicit["host"] = host
         cfg["host"] = host
     if user:
+        explicit["user"] = user
         cfg["user"] = user
     if identity_file:
+        explicit["identity_file"] = identity_file
         cfg["identity_file"] = identity_file
     if password:
+        explicit["password"] = password
         cfg["password"] = password
+    if port is not None:
+        explicit["port"] = port
+    if ssh:
+        explicit["ssh"] = True
+    if http:
+        explicit["http"] = True
+    if https:
+        explicit["https"] = True
+    cfg["_connect_explicit"] = explicit
     _apply_connect_flags(cfg, ssh=ssh, http=http, https=https, port=port)
 
     obj = AppContext(cfg=cfg, format=format, yes=yes, console=get_console())  # type: ignore[arg-type]
@@ -277,6 +339,12 @@ def root(
     if save_config:
         if not cfg.get("host"):
             fail(obj, t("msg.save_need_host"), error="need_host")
+        try:
+            persist_connection_overlay(cfg)
+        except ProfileError as exc:
+            if exc.code == "need_name":
+                fail(obj, t("err.profile_need_name"), error="need_name")
+            fail(obj, t("err.profile_need_host"), error="need_host")
         mgr.save(cfg)
         if format in ("json", "compact"):
             emit(

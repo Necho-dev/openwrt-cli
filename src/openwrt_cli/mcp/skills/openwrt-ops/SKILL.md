@@ -20,7 +20,8 @@ doctor
   ├─ capability missing → switch to SSH, or say the feature is unavailable
   └─ ok → read-only inspect (system / network / passwall2)
          → preview fields you would change
-         → writes need mcp.mode=readwrite (user: `openwrt config set --mcp-mode readwrite`)
+         → writes need that profile's mcp.mode=readwrite
+            (user: `openwrt profiles update NAME --mcp-mode readwrite`)
          → call a write tool only after the user agrees in chat
          → apply / restart is a second write (confirm again)
 ```
@@ -32,6 +33,10 @@ doctor
 - **readonly** (default): read tools work; write tools return `mcp_readonly`
 - **readwrite**: write tools run after the **user** confirms (client `destructiveHint` dialog, or a clear yes in chat)
 - **full** does not exist. Never invent it.
+
+`config set --mcp-mode` changes the global default for every profile that does not set its own. To grant writes on one router, the user runs `openwrt profiles update NAME --mcp-mode readwrite|readonly|inherit`. `profiles_current` is the active profile. `profiles_list` lists names, targets, and effective permissions, with no passwords.
+
+Router tools take an optional `profile`. Omit it to use the active profile. Pass a name to use that profile for this call only. That does not change the active profile in the CLI or TUI. Do not run `openwrt profiles use` to aim later MCP calls at another router. Parallel calls may name different profiles. A write is allowed only when that call's profile is `readwrite`. `openwrt mcp privilege` prints the tool matrix and highlights the effective mode of the active profile.
 
 High-risk ops are **never** MCP tools: reboot, shutdown, backup restore, user add/passwd/delete. Tell the user to run those in a human terminal (`openwrt system reboot --yes`). Do not run them yourself.
 
@@ -55,7 +60,7 @@ Ask the user to merge the snippet into their client config (key `openwrt`) and r
 
 See `USAGE.md` for the full table.
 
-**Read:** `doctor` · `system_status` · `system_processes` · `logs_read` · `network_overview` · `network_neighbors` · `network_leases` · `network_metrics` · `firewall_view` · `qos_view` · `service_list` · `service_show` · `passwall2_status` · `passwall2_nodes` (no Ping) · `passwall2_node_ping` · `passwall2_acl` · `passwall2_logs` · `config_show` (password masked).
+**Read:** `profiles_current` · `profiles_list` · `doctor` · `system_status` · `system_processes` · `logs_read` · `network_overview` · `network_neighbors` · `network_leases` · `network_metrics` · `firewall_view` · `qos_view` · `service_list` · `service_show` · `passwall2_status` · `passwall2_nodes` (no Ping) · `passwall2_node_ping` · `passwall2_acl` · `passwall2_logs` · `config_show` (language, active name, effective mcp.mode).
 
 **Write** (readwrite + user confirm): `network_set_hostname` · `wifi_set` · `lan_set` · `network_reload` · `system_hostname` · `service_action` · `passwall2_node_add|set|delete` · `passwall2_acl_add|set|delete` · `passwall2_acl_source_add|remove` · `backup_create` · `user_key_add`.
 

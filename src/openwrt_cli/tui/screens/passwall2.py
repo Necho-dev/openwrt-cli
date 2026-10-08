@@ -84,6 +84,16 @@ def compose_passwall2() -> ComposeResult:
             yield RichLog(id="pw2-log", highlight=False, markup=False, wrap=True, max_lines=400)
 
 
+class PassWall2Pane(TabPane):
+    """Outer PassWall2 tab, mounted later when a switched account has the app."""
+
+    def __init__(self) -> None:
+        super().__init__(t("tab.passwall2"), id="passwall2")
+
+    def compose(self) -> ComposeResult:
+        yield from compose_passwall2()
+
+
 def setup_passwall2_tables(app) -> None:
     for tid, cols in (
         ("pw2-node-table", (

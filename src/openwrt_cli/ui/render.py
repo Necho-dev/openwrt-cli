@@ -181,6 +181,21 @@ def _render_text(console: Console, result: CommandResult) -> None:
     if kind == "metrics" and isinstance(data, dict):
         _render_metrics(console, data)
         return
+    if kind == "static_leases" and isinstance(data, dict):
+        _table(console, [t("col.ip"), t("col.mac"), t("col.hostname")], [
+            [row["ip"], ", ".join(row["macs"]), row["hostname"]]
+            for row in data["leases"]
+        ], empty=t("empty.leases"))
+        return
+    if kind == "redirects" and isinstance(data, dict):
+        _table(console, ["Name", "Source", "Destination", "Protocol", "Enabled", "Family"], [
+            [row["name"], f'{row["src"]}:{row["src_dport"]}',
+             f'{row["dest"]} [{row["dest_ip"]}]:{row["dest_port"]}',
+             ", ".join(row["proto"]) if isinstance(row["proto"], list) else row["proto"],
+             str(row["enabled"]), row["family"]]
+            for row in data["redirects"]
+        ])
+        return
     if kind == "leases" and isinstance(data, dict):
         _table(console, [t("col.ip"), t("col.mac"), t("col.device_type"), t("col.vendor"), t("col.hostname")], [
             [le.get("ip", ""), le.get("mac", ""), le.get("device_type") or "?", le.get("vendor") or t("unknown.vendor"), le.get("hostname") or "—"]

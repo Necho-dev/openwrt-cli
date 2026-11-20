@@ -3,15 +3,43 @@ from __future__ import annotations
 import ipaddress
 import re
 import time
+from contextlib import nullcontext
 from datetime import datetime
 from typing import Any
 
 from openwrt_cli.core.channels.uci import sections_of_type
 from openwrt_cli.core.device import Capability, DeviceClient
 from openwrt_cli.core.errors import CapabilityError, DeviceCommandError, DeviceConnectionError
+from openwrt_cli.core.http_client import HTTPDevice
 from openwrt_cli.core.mac_vendor import lookup_enhanced
 from openwrt_cli.i18n import t
 from openwrt_cli.services.result import CommandResult
+
+
+def _lease_mac(value: str) -> str:
+    if not re.fullmatch(r"(?:[0-9a-f]{12}|[0-9a-f]{2}(?:(?:[:-])[0-9a-f]{2}){5})", value, re.I):
+        return ""
+    compact = value.replace(":", "").replace("-", "").lower()
+    if re.fullmatch(r"[0-9a-f]{12}", compact):
+        return ":".join(compact[i:i + 2] for i in range(0, 12, 2))
+    return ""
+
+
+def _static_lease_rows(config: dict) -> list[dict]:
+    rows = []
+    for section, host in config.items():
+        if host.get(".type") != "host":
+            continue
+        macs = host.get("mac") or []
+        if isinstance(macs, str):
+            macs = macs.split()
+        rows.append({
+            "section": section,
+            "macs": [_lease_mac(mac) or mac for mac in macs],
+            "ip": host.get("ip") or "",
+            "hostname": host.get("name") or "",
+        })
+    return rows
 
 
 def _fmt_bytes(num_bytes: int | float) -> str:
@@ -649,6 +677,113 @@ class NetworkService:
             {"uci_config": values, "leases": leases},
             transport=self.device.transport,
             kind="dhcp",
+        )
+
+    def static_leases(self) -> CommandResult:
+        rows = _static_lease_rows(self.device.uci.show("dhcp"))
+        return CommandResult.ok_data(
+            {"leases": rows}, transport=self.device.transport, kind="static_leases",
+        )
+
+    def set_static_lease(self, mac: str, ip: str, hostname: str) -> CommandResult:
+        mac = _lease_mac(mac.strip())
+        hostname = hostname.strip()
+        if not mac or mac == "00:00:00:00:00:00" or int(mac[:2], 16) & 1:
+            return self._static_lease_error("invalid_mac")
+        try:
+            address = ipaddress.IPv4Address(ip.strip())
+        except ValueError:
+            return self._static_lease_error("invalid_ip")
+        if address.is_unspecified or address.is_multicast or address.is_loopback or int(address) == 0xffffffff:
+            return self._static_lease_error("invalid_ip")
+        if not hostname or len(hostname) > 253 or any(
+            not re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?", label)
+            for label in hostname.split(".")
+        ):
+            return self._static_lease_error("invalid_hostname")
+        ip = str(address)
+        device = self.device
+        http = device.transport == "http"
+        session = device.hold_session() if isinstance(device, HTTPDevice) else nullcontext()
+        with session:
+            rows = self.static_leases().data["leases"]
+            matches = [row for row in rows if mac in row["macs"]]
+            if len(matches) > 1 or any(row["ip"] == ip and mac not in row["macs"] for row in rows):
+                return self._static_lease_error("conflict")
+            current = matches[0] if matches else None
+            if current and current["ip"] == ip and current["hostname"] == hostname:
+                return self._static_lease_result(current, "unchanged")
+            if current and len(current["macs"]) != 1:
+                return self._static_lease_error("conflict")
+            active = self.leases()
+            if not active.ok or active.degraded:
+                return self._static_lease_error("active_unavailable")
+            if any(
+                row["ip"] == ip and _lease_mac(row["mac"]) != mac
+                for row in active.data["leases"]
+            ):
+                return self._static_lease_error("conflict")
+
+            if http:
+                if device.ubus.call("uci", "changes").get("changes"):
+                    return self._static_lease_error("pending")
+            elif device.shell.exec("uci changes dhcp", check=True).strip():
+                return self._static_lease_error("pending")
+
+            values = {"name": hostname, "ip": ip}
+            try:
+                if current:
+                    section = current["section"]
+                    device.uci.set_values("dhcp", section, values)
+                else:
+                    section = device.uci.add("dhcp", "host", {**values, "mac": [mac]})
+                expected = {"section": section, "macs": [mac], "ip": ip, "hostname": hostname}
+                self._verify_static_lease(expected)
+                if http:
+                    device.ubus.call("uci", "apply", {"rollback": True, "timeout": 60})
+                else:
+                    device.shell.exec("uci commit dhcp", check=True)
+            except DeviceCommandError as error:
+                try:
+                    if http:
+                        device.ubus.call("uci", "revert", {"config": "dhcp"})
+                    else:
+                        device.shell.exec("uci revert dhcp", check=True)
+                except (DeviceCommandError, DeviceConnectionError) as cleanup_error:
+                    raise DeviceCommandError(
+                        t("err.static_lease_cleanup", error=error, cleanup=cleanup_error)
+                    ) from error
+                raise
+
+            if http:
+                self._verify_static_lease(expected)
+                device.ubus.call("uci", "confirm")
+            else:
+                try:
+                    device.shell.exec("/etc/init.d/dnsmasq reload", check=True)
+                except DeviceCommandError as error:
+                    raise DeviceCommandError(t("err.static_lease_reload", error=error)) from error
+            self._verify_static_lease(expected)
+            return self._static_lease_result(expected, "updated" if current else "created")
+
+    def _verify_static_lease(self, expected: dict) -> None:
+        rows = self.static_leases().data["leases"]
+        relevant = [
+            row for row in rows if row["ip"] == expected["ip"]
+            or set(row["macs"]).intersection(expected["macs"])
+        ]
+        if len(relevant) != 1 or any(relevant[0][key] != expected[key] for key in ("macs", "ip", "hostname")):
+            raise DeviceCommandError(t("err.static_lease_verify"))
+
+    def _static_lease_error(self, code: str) -> CommandResult:
+        return CommandResult.fail(
+            t(f"err.static_lease_{code}"), transport=self.device.transport, data={"error": code},
+        )
+
+    def _static_lease_result(self, row: dict, action: str) -> CommandResult:
+        return CommandResult.ok_data(
+            {"leases": [row], "action": action}, transport=self.device.transport,
+            kind="static_leases", message=t(f"msg.static_lease_{action}"),
         )
 
     def leases(self) -> CommandResult:

@@ -10,6 +10,22 @@ GitHub Release 正文使用英文，并附上本节的链接。
 
 ## [Unreleased]
 
+## [1.3.1] - 2026-11-20
+
+### 新增
+
+- 用 `openwrt network static-leases` 查看已配置的 IPv4 静态 DHCP 租约，用 `openwrt network set-static-lease` 按 MAC 创建或更新。写入前检查已配置的静态租约和当前活动租约，避免地址冲突。
+- 用 `openwrt firewall set-redirect` 按名称创建或更新 DNAT 端口转发规则，检查规则重叠，并按目标 IP 确定地址族。
+- 新增 MCP 工具 `network_static_leases`、`network_set_static_lease` 和 `firewall_set_redirect`。写入沿用现有的 `readwrite` 权限规则。
+
+### 优化
+
+- 防火墙转发规则列表显示启用状态和地址族。
+
+### 修复
+
+- 修复 SSH 调用 `ubus` 时 JSON 参数的引号处理，保留值中的单引号。
+
 ## [1.3.0] - 2026-10-08
 
 ### 新增

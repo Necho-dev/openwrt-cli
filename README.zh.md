@@ -61,7 +61,8 @@
 
 - **三层交互** — CLI 表格、`setup` + `wizard`、以及 `openwrt tui`
 - **doctor** — 按 SSH/HTTP 能力做体检，结果结构化，可直接 `-f json`
-- **网络** — 接口、路由、规则、邻居、带 MAC 厂商的 DHCP 租约，可选 Bandix 历史速率
+- **网络** — 接口、路由、规则、邻居、活动 DHCP 租约、IPv4 静态 DHCP 租约，可选 Bandix 历史速率
+- **防火墙** — 查看、创建和更新 DNAT 端口转发规则
 - **PassWall2** — 可选 `luci-app-passwall2`；**需要 openwrt-cli &gt;= 1.1.0**。读状态 / 节点 / ACL / 日志；可增删改节点与 ACL；探测到插件时出现 TUI 第 `7` 页
 - **同一套设备模型** — SSH 与 HTTP 共用 ubus / uci / shell 语义；缺能力就明确失败（不造假数据）
 - **Agent-ready** — `-f json` / `-f compact`，不依赖 TTY 或颜色
@@ -181,12 +182,16 @@ openwrt network rules
 openwrt network neighbors          # IPv4 邻居；有 Bandix 时叠加设备速率
 openwrt network set-hostname --mac aa:bb:cc:dd:ee:ff --name phone --yes
 openwrt network leases
+openwrt network static-leases
+openwrt network set-static-lease --mac 02:11:22:33:44:55 --ip 192.168.1.50 --hostname printer
 openwrt network metrics            # Bandix 历史（需要 luci-app-bandix）
 openwrt network metrics --ip 192.168.1.50 --since 30m
 openwrt network wifi list
 openwrt network lan show
 openwrt network reload --yes
 ```
+
+`network leases` 查看活动租约，`network static-leases` 查看已配置的静态租约。`set-static-lease` 检查两类租约是否有冲突，再按 MAC 应用 IPv4 地址预留。静态租约命令支持 LuCI HTTP(S) 和 SSH。
 
 `qos` 读的是 OpenWrt SQM / `tc`（`luci-app-sqm`），不是 Bandix 每设备限速。
 
@@ -216,8 +221,12 @@ UCI 视图可以走 HTTP。依赖 iptables 或 `tc` 的命令在 HTTP 下会明�
 ```bash
 openwrt --https firewall zones     # UCI，可用
 openwrt --https firewall rules     # 需要 iptables → 失败（改 --ssh）
+openwrt firewall redirects
+openwrt firewall set-redirect --name example-web --src-port 8443 --dest-ip 192.168.1.50 --dest-port 443
 openwrt qos status
 ```
+
+`set-redirect` 支持通过 LuCI HTTP(S) 或 SSH 应用规则。使用相同的唯一名称更新规则。默认从 WAN 转发到 LAN，协议为 TCP，规则已启用。地址族由目标 IP 决定，转发列表会显示地址族和启用状态。
 
 ### service / user / backup
 
@@ -397,8 +406,8 @@ claude mcp add openwrt -- openwrt-mcp
 | | 工具 |
 |---|---|
 | **先探活** | `profiles_current` · `profiles_list` · `doctor` · `config_show`（不含密码） |
-| **只读** | `system_status` · `network_overview` · `network_neighbors` · `network_leases` · `firewall_view` · `service_list` · `passwall2_status` · `passwall2_nodes`（不 Ping）· `passwall2_logs` · `logs_read` |
-| **写入** | 仅当 `mcp.mode=readwrite`，并且你在对话里明确同意（如 `wifi_set`、`lan_set`、PassWall2 节点/ACL、`service_action`） |
+| **只读** | `system_status` · `network_overview` · `network_neighbors` · `network_leases` · `network_static_leases` · `firewall_view` · `service_list` · `passwall2_status` · `passwall2_nodes`（不 Ping）· `passwall2_logs` · `logs_read` |
+| **写入** | 仅当 `mcp.mode=readwrite`，并且你在对话里明确同意（如 `network_set_static_lease`、`firewall_set_redirect`、`wifi_set`、`lan_set`、PassWall2 节点/ACL、`service_action`） |
 | **不要走 MCP** | 重启、关机、恢复备份、用户增删改密 — 请在自己的终端执行（例如 `openwrt system reboot --yes`） |
 
 ### 助手连的是哪一台

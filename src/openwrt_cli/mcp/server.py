@@ -118,6 +118,22 @@ async def network_leases(profile: str | None = None) -> dict:
 
 @mcp.tool(annotations=_READ)
 @_safe()
+async def network_static_leases(profile: str | None = None) -> dict:
+    """List configured DHCP reservations. Pass profile to use that saved profile for this call only."""
+    return await _thread("network.static_leases", handlers.network_static_leases, profile=profile)
+
+
+@mcp.tool(annotations=_WRITE)
+@_safe()
+async def network_set_static_lease(mac: str, ip: str, hostname: str, profile: str | None = None) -> dict:
+    """Create or update a DHCP IPv4 reservation by MAC. Requires readwrite and user approval. Pass profile to use that saved profile for this call only."""
+    return await _thread(
+        "network.set_static_lease", lambda c: handlers.network_set_static_lease(c, mac, ip, hostname), profile=profile,
+    )
+
+
+@mcp.tool(annotations=_READ)
+@_safe()
 async def network_metrics(ip: str | None = None, mac: str | None = None, since: str | None = None, until: str | None = None, profile: str | None = None) -> dict:
     """Bandix traffic history (needs luci-app-bandix). Omit ip/mac for all-device total. Pass profile to use that saved profile for this call only; omit it to use the active profile."""
     return await _thread("network.metrics", lambda c: handlers.network_metrics(c, ip=ip, mac=mac, since=since, until=until), profile=profile)
@@ -128,6 +144,21 @@ async def network_metrics(ip: str | None = None, mac: str | None = None, since: 
 async def firewall_view(profile: str | None = None) -> dict:
     """Firewall zones, UCI status, and redirects. iptables filter/NAT need SSH — this tool stays on UCI so HTTP works. Pass profile to use that saved profile for this call only; omit it to use the active profile."""
     return await _thread("firewall.view", handlers.firewall_view, profile=profile)
+
+
+@mcp.tool(annotations=_WRITE)
+@_safe()
+async def firewall_set_redirect(
+    name: str, src_port: int, dest_ip: str, dest_port: int, src: str = "wan", dest: str = "lan",
+    proto: str = "tcp", enabled: bool = True, profile: str | None = None,
+) -> dict:
+    """Create or update a DNAT rule by unique name. Requires readwrite and user approval. Pass profile to use that saved profile for this call only."""
+    return await _thread(
+        "firewall.set_redirect",
+        lambda c: handlers.firewall_set_redirect(c, name, src_port, dest_ip, dest_port,
+                                                src=src, dest=dest, proto=proto, enabled=enabled),
+        profile=profile,
+    )
 
 
 @mcp.tool(annotations=_READ)

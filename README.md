@@ -61,7 +61,8 @@ The command is **`openwrt`**. `openwrt-cli` is still installed as a compatibilit
 
 - **Three surfaces** — CLI tables, `setup` + `wizard`, and `openwrt tui`
 - **doctor** — capability-aware SSH/HTTP health checks, structured, `-f json` ready
-- **Network** — interfaces, routes, rules, neighbors, DHCP leases with MAC vendors, optional Bandix history
+- **Network** — interfaces, routes, rules, neighbors, active DHCP leases, IPv4 DHCP reservations, optional Bandix history
+- **Firewall** — list, create, and update DNAT port-forwarding rules
 - **PassWall2** — optional `luci-app-passwall2`; **requires openwrt-cli &gt;= 1.1.0**. Read status / nodes / ACL / logs; add, edit, delete nodes and ACL; TUI tab `7` when the package is present
 - **One device model** — SSH and HTTP share ubus / uci / shell semantics; missing capability fails loudly (no fake data)
 - **Agent-ready** — `-f json` / `-f compact`, no TTY or color required
@@ -181,12 +182,16 @@ openwrt network rules
 openwrt network neighbors          # IPv4 neighbors; Bandix overlays device rates when present
 openwrt network set-hostname --mac aa:bb:cc:dd:ee:ff --name phone --yes
 openwrt network leases
+openwrt network static-leases
+openwrt network set-static-lease --mac 02:11:22:33:44:55 --ip 192.168.1.50 --hostname printer
 openwrt network metrics            # Bandix history (needs luci-app-bandix)
 openwrt network metrics --ip 192.168.1.50 --since 30m
 openwrt network wifi list
 openwrt network lan show
 openwrt network reload --yes
 ```
+
+Use `network leases` for active leases and `network static-leases` for configured reservations. `set-static-lease` applies an IPv4 reservation by MAC after checking both lists for conflicts. Static lease commands support LuCI HTTP(S) and SSH.
 
 `qos` is OpenWrt SQM / `tc` (`luci-app-sqm`), not Bandix per-device limits.
 
@@ -216,8 +221,12 @@ UCI views work over HTTP. Commands that need iptables or `tc` fail on HTTP inste
 ```bash
 openwrt --https firewall zones     # UCI, OK
 openwrt --https firewall rules     # needs iptables → fail (use --ssh)
+openwrt firewall redirects
+openwrt firewall set-redirect --name example-web --src-port 8443 --dest-ip 192.168.1.50 --dest-port 443
 openwrt qos status
 ```
+
+`set-redirect` applies the rule through LuCI HTTP(S) or SSH. Reuse its unique name to update it. The defaults are WAN to LAN, TCP, and enabled. The destination IP determines the address family. The redirect list shows the address family and enabled state.
 
 ### service / user / backup
 
@@ -400,8 +409,8 @@ Reload MCP in the client. The server key must stay `openwrt`. If `openwrt-mcp` i
 | | Tools |
 |---|---|
 | **First hop** | `profiles_current` · `profiles_list` · `doctor` · `config_show` (no passwords) |
-| **Read** | `system_status` · `network_overview` · `network_neighbors` · `network_leases` · `firewall_view` · `service_list` · `passwall2_status` · `passwall2_nodes` (no Ping) · `passwall2_logs` · `logs_read` |
-| **Write** | only when `mcp.mode=readwrite` **and** you confirm in chat (`wifi_set`, `lan_set`, PassWall2 node/ACL, `service_action`, …) |
+| **Read** | `system_status` · `network_overview` · `network_neighbors` · `network_leases` · `network_static_leases` · `firewall_view` · `service_list` · `passwall2_status` · `passwall2_nodes` (no Ping) · `passwall2_logs` · `logs_read` |
+| **Write** | only when `mcp.mode=readwrite` **and** you confirm in chat (`network_set_static_lease`, `firewall_set_redirect`, `wifi_set`, `lan_set`, PassWall2 node/ACL, `service_action`, …) |
 | **Never MCP** | reboot · shutdown · backup restore · user add / passwd / delete — human CLI only (`openwrt system reboot --yes`) |
 
 ### Which router the agent talks to

@@ -161,6 +161,10 @@ def firewall_view(device: DeviceClient) -> CommandResult:
     return CommandResult.ok_data(data, transport=transport or device.transport, kind="firewall", warnings=warnings, degraded=degraded)
 
 
+def firewall_set_redirect(device: DeviceClient, name: str, src_port: int, dest_ip: str, dest_port: int, **options) -> CommandResult:
+    return FirewallService(device).set_redirect(name, src_port, dest_ip, dest_port, **options)
+
+
 def qos_view(device: DeviceClient) -> CommandResult:
     return QoSService(device).status()
 
@@ -227,6 +231,14 @@ def profiles_current(device: DeviceClient | None = None, *, cfg: dict | None = N
     except ProfileError:
         return CommandResult.fail(t("msg.no_profiles"), data={"error": "no_profiles"})
     return CommandResult.ok_data(card, transport="", kind="profile")
+
+
+def network_static_leases(device: DeviceClient) -> CommandResult:
+    return NetworkService(device).static_leases()
+
+
+def network_set_static_lease(device: DeviceClient, mac: str, ip: str, hostname: str) -> CommandResult:
+    return NetworkService(device).set_static_lease(mac, ip, hostname)
 
 
 def network_set_hostname(device: DeviceClient, mac: str, name: str) -> CommandResult:

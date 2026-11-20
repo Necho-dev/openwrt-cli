@@ -22,7 +22,8 @@ class _SSHUbus:
 
     def call(self, obj: str, method: str, params: dict[str, Any] | None = None, timeout: int | None = None) -> Any:
         if params:
-            cmd = f"ubus call {obj} {method} '{json.dumps(params, ensure_ascii=False)}'"
+            payload = _uci_quote(json.dumps(params, ensure_ascii=False))
+            cmd = f"ubus call {obj} {method} {payload}"
         else:
             cmd = f"ubus call {obj} {method}"
         raw = self._ssh.exec(cmd, timeout=timeout or 30)

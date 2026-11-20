@@ -60,9 +60,9 @@ Ask the user to merge the snippet into their client config (key `openwrt`) and r
 
 See `USAGE.md` for the full table.
 
-**Read:** `profiles_current` · `profiles_list` · `doctor` · `system_status` · `system_processes` · `logs_read` · `network_overview` · `network_neighbors` · `network_leases` · `network_metrics` · `firewall_view` · `qos_view` · `service_list` · `service_show` · `passwall2_status` · `passwall2_nodes` (no Ping) · `passwall2_node_ping` · `passwall2_acl` · `passwall2_logs` · `config_show` (language, active name, effective mcp.mode).
+**Read:** `profiles_current` · `profiles_list` · `doctor` · `system_status` · `system_processes` · `logs_read` · `network_overview` · `network_neighbors` · `network_leases` · `network_static_leases` · `network_metrics` · `firewall_view` · `qos_view` · `service_list` · `service_show` · `passwall2_status` · `passwall2_nodes` (no Ping) · `passwall2_node_ping` · `passwall2_acl` · `passwall2_logs` · `config_show` (language, active name, effective mcp.mode).
 
-**Write** (readwrite + user confirm): `network_set_hostname` · `wifi_set` · `lan_set` · `network_reload` · `system_hostname` · `service_action` · `passwall2_node_add|set|delete` · `passwall2_acl_add|set|delete` · `passwall2_acl_source_add|remove` · `backup_create` · `user_key_add`.
+**Write** (readwrite + user confirm): `network_set_hostname` · `network_set_static_lease` · `wifi_set` · `lan_set` · `firewall_set_redirect` · `network_reload` · `system_hostname` · `service_action` · `passwall2_node_add|set|delete` · `passwall2_acl_add|set|delete` · `passwall2_acl_source_add|remove` · `backup_create` · `user_key_add`.
 
 `lan_set` / `wifi_set` can knock the router offline — say so before asking to confirm.
 

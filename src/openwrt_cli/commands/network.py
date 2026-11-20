@@ -76,6 +76,25 @@ def network_leases(ctx: typer.Context, format: FormatOpt = None, yes: YesOpt = F
     run_service(_svc(ctx, format, yes), lambda d: NetworkService(d).leases())
 
 
+@network_app.command("static-leases", help=_("help.net.static_leases"))
+def network_static_leases(ctx: typer.Context, format: FormatOpt = None, yes: YesOpt = False):
+    run_service(_svc(ctx, format, yes), lambda d: NetworkService(d).static_leases())
+
+
+@network_app.command("set-static-lease", help=_("help.net.set_static_lease"))
+def network_set_static_lease(
+    ctx: typer.Context,
+    mac: str = typer.Option(..., "--mac"),
+    ip: str = typer.Option(..., "--ip"),
+    hostname: str = typer.Option(..., "--hostname", "--name"),
+    format: FormatOpt = None,
+    yes: YesOpt = False,
+):
+    app = _svc(ctx, format, yes)
+    require_confirm(app.yes, t("confirm.static_lease", mac=mac, ip=ip, hostname=hostname), fmt=app.format)
+    run_service(app, lambda d: NetworkService(d).set_static_lease(mac, ip, hostname))
+
+
 @network_app.command("neighbors", help=_("help.net.neighbors"))
 @network_app.command("neighbours", hidden=True)
 @network_app.command("arp", hidden=True)

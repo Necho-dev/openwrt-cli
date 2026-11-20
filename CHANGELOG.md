@@ -14,6 +14,22 @@ The English section becomes the GitHub Release body, with a link to the Chinese 
 
 ## [Unreleased]
 
+## [1.3.1] - 2026-11-20
+
+### Added
+
+- List configured IPv4 DHCP reservations with `openwrt network static-leases`. Create or update a reservation by MAC with `openwrt network set-static-lease`. The write checks both reservations and active leases for conflicts.
+- Create or update a DNAT port-forwarding rule by name with `openwrt firewall set-redirect`. The command checks for overlapping rules and derives the address family from the destination IP.
+- Expose these operations as the MCP tools `network_static_leases`, `network_set_static_lease`, and `firewall_set_redirect`. Writes use the existing `readwrite` permission model.
+
+### Improved
+
+- Firewall redirect listings include each rule's enabled state and address family.
+
+### Fixed
+
+- Quote JSON payloads passed to `ubus` over SSH so values containing apostrophes are passed intact.
+
 ## [1.3.0] - 2026-10-08
 
 ### Added

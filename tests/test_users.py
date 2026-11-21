@@ -51,7 +51,7 @@ def test_users_add_list_activate_update_and_config_keeps_override(tmp_path: Path
     assert body["profiles"][0]["host"] == "192.0.2.1"
     assert body["profiles"][0]["password"] == MASKED_SECRET
     assert body["profiles"][0]["mcp"]["mode"] == "readwrite"
-    assert body["profiles"][0]["mcp_effective"] == "readwrite"
+    assert body["profiles"][0]["mcp_effective"] == "readonly"
 
     second = runner.invoke(app, hoist_global_options([
         "--config", str(cfg), "--json", "profiles", "add", "lab",
@@ -60,7 +60,7 @@ def test_users_add_list_activate_update_and_config_keeps_override(tmp_path: Path
     assert second.exit_code == 0, second.stdout
     shown = runner.invoke(app, ["--config", str(cfg), "--json", "config", "show"])
     assert _parse(shown.stdout)["active"] == "home"
-    assert _parse(shown.stdout)["mcp"]["effective"] == "readwrite"
+    assert _parse(shown.stdout)["mcp"]["effective"] == "readonly"
 
     activated = runner.invoke(app, ["--config", str(cfg), "--json", "profiles", "use", "lab"])
     assert activated.exit_code == 0
@@ -345,7 +345,7 @@ def test_profiles_commands_accept_json_and_show_masks_the_password(tmp_path: Pat
     assert current["profile"]["host"] == "192.0.2.1"
     assert current["profile"]["password"] == MASKED_SECRET
     assert current["profile"]["mcp"]["mode"] == "readwrite"
-    assert current["profile"]["mcp_effective"] == "readwrite"
+    assert current["profile"]["mcp_effective"] == "readonly"
     assert "secret" not in shown.stdout
 
     second = runner.invoke(app, hoist_global_options([

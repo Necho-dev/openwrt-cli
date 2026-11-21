@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import os
+import logging
 import threading
 from collections.abc import Callable
 from typing import Any
@@ -12,6 +12,7 @@ from openwrt_cli.core.connection import open_connection
 from openwrt_cli.core.device import DeviceClient
 from openwrt_cli.core.errors import CapabilityError, DeviceCommandError, DeviceConnectionError
 from openwrt_cli.i18n import t
+from openwrt_cli.mcp.audit import observe_dispatch, observe_target
 from openwrt_cli.mcp.guard import check_call
 from openwrt_cli.mcp.payload import cap_payload, to_payload
 from openwrt_cli.services.result import CommandResult
@@ -36,8 +37,8 @@ def _with_profile(payload: dict[str, Any], name: str) -> dict[str, Any]:
 
 class McpSession:
     def __init__(self, config_path: str | None = None):
-        raw = config_path or os.environ.get("OPENWRT_CONFIG")
-        self._mgr = ConfigManager(raw)
+        self._mgr = ConfigManager(config_path)
+        self._migration_warning = None
         self._clients: dict[tuple, DeviceClient] = {}
         self._locks: dict[tuple, threading.Lock] = {}
         self._pool_lock = threading.Lock()
@@ -47,7 +48,12 @@ class McpSession:
         return self._mgr.config_path
 
     def load_cfg(self) -> dict:
-        return self._mgr.load()
+        cfg = self._mgr.load(migrate=True)
+        warning = self._mgr.migration_warning
+        if warning and warning != self._migration_warning:
+            logging.getLogger(__name__).warning(t("warn.config_migration", path=self.config_path, error=warning))
+        self._migration_warning = warning
+        return cfg
 
     def current_mode(self) -> str:
         return mcp_mode(self.load_cfg())
@@ -63,11 +69,12 @@ class McpSession:
     def invoke(
         self,
         logical: str,
-        fn: Callable[[DeviceClient], CommandResult],
+        fn: Callable[[DeviceClient], CommandResult] | Callable[[dict], CommandResult],
         *,
         profile: str | None = None,
+        local: bool = False,
     ) -> dict[str, Any]:
-        cfg = self.load_cfg()
+        cfg = self._mgr.load() if local else self.load_cfg()
         requested = (profile or "").strip()
         try:
             if requested:
@@ -86,6 +93,7 @@ class McpSession:
         def finish(payload: dict[str, Any]) -> dict[str, Any]:
             return _with_profile(payload, resolved)
 
+        observe_target(trial)
         denied = check_call(logical, trial)
         if denied is not None:
             return finish(cap_payload(to_payload(denied)))
@@ -100,13 +108,16 @@ class McpSession:
                 data={"error": "mcp_mode_invalid", "mode": e.mode},
             )
             return finish(cap_payload(to_payload(fail)))
-        key = _connection_key(trial)
-        lock = self._lock_for(key)
         client: DeviceClient | None = None
         try:
-            with lock:
-                client = self._client_for(key, trial)
-                result = fn(client)
+            if local:
+                result = fn(trial)
+            else:
+                key = _connection_key(trial)
+                with self._lock_for(key):
+                    client = self._client_for(key, trial)
+                    observe_dispatch()
+                    result = fn(client)
         except DeviceConnectionError as e:
             result = CommandResult.fail(t("msg.connect_fail", error=e), data={"error": "connect"})
         except CapabilityError as e:

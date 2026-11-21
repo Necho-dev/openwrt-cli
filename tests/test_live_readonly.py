@@ -11,7 +11,7 @@ pytestmark = pytest.mark.live
 
 # Read-only CLI: no --yes mutations, no TUI, no setup/wizard prompts.
 _REQUIRED = (
-    (["-f", "json", "config", "show"], {"ok", "host", "transport", "port"}),
+    (["-f", "json", "config", "show"], {"ok", "path", "active", "mcp"}),
     (["-f", "json", "system", "status"], {"ok", "hostname"}),
     (["-f", "json", "system", "info"], {"ok"}),
     (["-f", "json", "system", "board"], {"ok"}),
@@ -59,6 +59,8 @@ def test_readonly_json(args: list[str], keys: set[str], run_cli, parse_json, red
     assert not missing, (missing, sorted(data))
     blob = json.dumps(data)
     assert "password" not in blob.lower() or MASKED_SECRET in blob
+    if args[-2:] == ["config", "show"]:
+        assert not {"host", "user", "port", "password", "identity_file"} & data.keys()
     if "routes" in data:
         assert data["routes"], "expected kernel routes"
         sample = data["routes"][0]
@@ -86,7 +88,7 @@ def test_config_path_and_text_show(run_cli) -> None:
     path = run_cli("config", "path")
     assert path.returncode == 0
     assert path.stdout.strip().endswith(".yaml")
-    shown = run_cli("-L", "zh", "config", "show")
+    shown = run_cli("-L", "zh", "profiles", "show")
     assert shown.returncode == 0
     text = shown.stdout
     assert "443" in text or "80" in text or "22" in text

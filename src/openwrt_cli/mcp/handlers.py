@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import json
 import os
-from datetime import datetime
+import sqlite3
+from base64 import urlsafe_b64decode, urlsafe_b64encode
+from datetime import datetime, timedelta
 from typing import Any
 
 from openwrt_cli.core.config import ProfileError, mcp_current_profile, mcp_profiles, public_config
@@ -18,15 +21,17 @@ from openwrt_cli.services.network import NetworkService
 from openwrt_cli.services.passwall2 import PassWall2Service
 from openwrt_cli.services.qos import QoSService
 from openwrt_cli.services.result import CommandResult
+from openwrt_cli.services.sample_store import LOG_SOURCES, METRIC_SOURCES, SampleStore
+from openwrt_cli.services.sampler import router_key
 from openwrt_cli.services.service import ServiceService
 from openwrt_cli.services.system import SystemService, parse_log_time
 from openwrt_cli.services.user import UserService
 
 
-def _dt(label: str, value: str | None) -> datetime | None:
+def _dt(label: str, value: str | None, *, now: datetime | None = None) -> datetime | None:
     if not value:
         return None
-    return parse_log_time(value)
+    return parse_log_time(value, now=now)
 
 
 def _merge_ok(*results: CommandResult) -> tuple[dict[str, Any], list[str], bool, str]:
@@ -219,6 +224,63 @@ def passwall2_logs(
 def config_show(device: DeviceClient | None = None, *, cfg: dict | None = None, path: str | None = None) -> CommandResult:
     data = public_config(cfg or {}, path=path)
     return CommandResult.ok_data(data, transport=str((cfg or {}).get("transport") or ""), kind="config")
+
+
+def samples_query(
+    cfg: dict, *, source: str, since: str | None = None, until: str | None = None,
+    subject: str | None = None, limit: int = 100, offset: int = 0, cursor: str | None = None,
+) -> CommandResult:
+    sources = (*LOG_SOURCES, *METRIC_SOURCES)
+    if source not in sources and not (source.startswith("passwall2.acl.") and source.removeprefix("passwall2.acl.")):
+        return CommandResult.fail(t("err.samples_source"), data={"error": "samples_source", "sources": list(sources)})
+    if subject is not None and (source not in METRIC_SOURCES or not subject.strip()):
+        return CommandResult.fail(t("err.samples_subject"), data={"error": "samples_subject"})
+    if not 1 <= limit <= 200 or not 0 <= offset <= 2**63 - 1 - limit:
+        return CommandResult.fail(t("err.samples_page"), data={"error": "samples_page"})
+    router = router_key(cfg)
+    snapshot = None
+    if cursor is not None:
+        try:
+            if not 1 <= len(cursor) <= 2048 or offset or any(v is not None for v in (since, until, subject)):
+                raise ValueError
+            version, target, cursor_source, start_ms, end_ms, subject, snapshot, offset = json.loads(
+                urlsafe_b64decode(cursor)
+            )
+            if (
+                version != 1 or target != router or cursor_source != source
+                or any(type(v) is not int or not -2**63 <= v < 2**63 for v in (start_ms, end_ms, snapshot, offset))
+                or start_ms > end_ms or snapshot < 0 or not 1 <= offset <= 2**63 - 1 - limit
+                or (subject is not None and (not isinstance(subject, str) or source not in METRIC_SOURCES))
+            ):
+                raise ValueError
+        except (ValueError, TypeError):
+            return CommandResult.fail(t("err.samples_cursor"), data={"error": "samples_cursor"})
+    else:
+        now = datetime.now()
+        try:
+            end = _dt("until", until, now=now) or now
+            start = _dt("since", since, now=now) or end - timedelta(hours=1)
+            start_ms, end_ms = round(start.timestamp() * 1000), round(end.timestamp() * 1000)
+        except (ValueError, OverflowError, OSError) as exc:
+            return CommandResult.fail(t("err.time_parse", label="time", error=exc), data={"error": "time_parse"})
+        if start > end:
+            return CommandResult.fail(t("err.samples_window"), data={"error": "samples_window"})
+        subject = subject.strip().lower().replace("-", ":") if subject is not None else None
+    try:
+        data = SampleStore().query(router, source, start_ms, end_ms,
+                                   limit=limit, offset=offset, subject=subject, snapshot=snapshot)
+    except (sqlite3.Error, ValueError, OSError):
+        return CommandResult.fail(t("err.samples_database"), data={"error": "samples_database"})
+    snapshot = data.pop("snapshot")
+    next_offset = data["next_offset"]
+    data["next_cursor"] = (
+        urlsafe_b64encode(json.dumps([1, router, source, start_ms, end_ms, subject, snapshot, next_offset]).encode()).decode()
+        if next_offset is not None else None
+    )
+    data.update(source=source, since_ms=start_ms, until_ms=end_ms, offset=offset)
+    if subject is not None:
+        data["subject"] = subject
+    return CommandResult.ok_data(data, transport="local", kind="samples")
 
 
 def profiles_list(device: DeviceClient | None = None, *, cfg: dict | None = None) -> CommandResult:

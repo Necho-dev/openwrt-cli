@@ -1,8 +1,10 @@
-"""YAML config file (~/.openwrt-cli.yaml)."""
+"""Resolve and manage the per-user YAML configuration."""
 
 from __future__ import annotations
 
 import os
+import tempfile
+from pathlib import Path
 from typing import Any
 
 import yaml
@@ -247,7 +249,7 @@ def find_profile(cfg: dict, name: str | None) -> dict | None:
 
 
 def mcp_mode(cfg: dict, account: dict | None = None) -> str:
-    """Effective MCP permission. Account override, else global, else readonly.
+    """Effective MCP permission capped by the global mode.
 
     An illegal value on either layer raises McpModeError, even when the other layer is legal.
     """
@@ -257,11 +259,11 @@ def mcp_mode(cfg: dict, account: dict | None = None) -> str:
     if account is None and cfg.get("active"):
         account = find_profile(cfg, str(cfg.get("active")))
     override = _account_mode_raw(account)
-    if override is None:
-        return global_mode
-    if override not in MCP_MODES:
+    if override is not None and override not in MCP_MODES:
         raise McpModeError(override)
-    return override
+    if "readonly" in (global_mode, override):
+        return "readonly"
+    return global_mode
 
 
 def _flatten(cfg: dict) -> None:
@@ -604,30 +606,60 @@ def parse_mcp_mode(value: str, *, allow_inherit: bool = False) -> str:
 
 
 class ConfigManager:
-    DEFAULT_CONFIG_PATH = os.path.expanduser("~/.openwrt-cli.yaml")
+    DEFAULT_CONFIG_PATH = "~/.openwrt/config.yaml"
+    LEGACY_CONFIG_PATH = "~/.openwrt-cli.yaml"
 
     def __init__(self, config_path: str | None = None):
-        raw = config_path or self.DEFAULT_CONFIG_PATH
+        explicit = config_path or os.environ.get("OPENWRT_CONFIG")
+        raw = explicit or self.DEFAULT_CONFIG_PATH
         self.config_path = os.path.expanduser(os.path.expandvars(str(raw)))
+        self._default_path = self.config_path if not explicit else None
+        self._legacy_path = os.path.expanduser(self.LEGACY_CONFIG_PATH)
+        self.migration_warning: str | None = None
+        if self._default_path and not os.path.exists(self.config_path) and os.path.isfile(self._legacy_path):
+            self.config_path = self._legacy_path
 
-    def load(self) -> dict:
-        """Load config; missing or empty file returns defaults. Does not rewrite the file."""
+    def load(self, *, migrate: bool = False) -> dict:
+        """Read configuration, optionally migrating the implicit legacy path."""
+        if self._default_path and os.path.exists(self._default_path):
+            self.config_path = self._default_path
         if not os.path.exists(self.config_path):
             return normalize_config({})
 
-        with open(self.config_path, "r", encoding="utf-8") as f:
-            raw = yaml.safe_load(f)
+        contents = Path(self.config_path).read_text(encoding="utf-8")
+        raw = yaml.safe_load(contents)
+        if migrate and self._default_path and self.config_path == self._legacy_path and isinstance(raw, (dict, type(None))):
+            try:
+                self._write(self._default_path, contents, replace=False)
+                self.migration_warning = None
+            except FileExistsError:
+                pass
+            except OSError as exc:
+                self.migration_warning = str(exc)
+                return normalize_config(raw)
+            self.config_path = self._default_path
+            return self.load()
         return normalize_config(raw)
 
     def save(self, config: dict) -> None:
-        """Write a canonical config to disk."""
-        parent = os.path.dirname(self.config_path) or "."
-        os.makedirs(parent, exist_ok=True)
-        with open(self.config_path, "w", encoding="utf-8") as f:
-            yaml.safe_dump(
-                canonical_config(config),
-                f,
-                allow_unicode=True,
-                default_flow_style=False,
-                sort_keys=False,
-            )
+        """Atomically replace the configuration with a private file."""
+        contents = yaml.safe_dump(canonical_config(config), allow_unicode=True, sort_keys=False)
+        self._write(self.config_path, contents, replace=True)
+
+    @staticmethod
+    def _write(path: str, contents: str, *, replace: bool) -> None:
+        parent = Path(path).parent
+        parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=parent, delete=False) as handle:
+            temporary = Path(handle.name)
+            try:
+                handle.write(contents)
+                handle.flush()
+                os.fsync(handle.fileno())
+                handle.close()
+                if replace:
+                    os.replace(temporary, path)
+                else:
+                    os.link(temporary, path)
+            finally:
+                temporary.unlink(missing_ok=True)

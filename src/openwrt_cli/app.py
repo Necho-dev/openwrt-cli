@@ -22,6 +22,7 @@ from openwrt_cli.commands.network import network_app
 from openwrt_cli.commands.skill_cmd import skill_app
 from openwrt_cli.commands.passwall2 import pw2_app
 from openwrt_cli.commands.qos import qos_app
+from openwrt_cli.commands.sample import sample_app
 from openwrt_cli.commands.service import service_app
 from openwrt_cli.commands.setup import run_setup
 from openwrt_cli.commands.system import system_app
@@ -251,6 +252,7 @@ app.add_typer(backup_app, name="backup", help=_("help.backup"))
 app.add_typer(system_app, name="system", help=_("help.system"))
 app.add_typer(config_app, name="config", help=_("help.config"))
 app.add_typer(doctor_app, name="doctor", help=_("help.doctor"))
+app.add_typer(sample_app, name="sample", help=_("help.sample"))
 app.add_typer(skill_app, name="skill", help=_("help.skill"))
 app.add_typer(mcp_app, name="mcp", help=_("help.mcp"))
 register_logs(app)
@@ -291,7 +293,9 @@ def root(
         raise typer.BadParameter(t("msg.bad_format"))
 
     mgr = ConfigManager(config)
-    cfg = mgr.load()
+    cfg = mgr.load(migrate=True)
+    if mgr.migration_warning:
+        typer.echo(t("warn.config_migration", path=mgr.config_path, error=mgr.migration_warning), err=True)
     cfg["_config_path"] = mgr.config_path
     if language:
         resolved = normalize_language(language)

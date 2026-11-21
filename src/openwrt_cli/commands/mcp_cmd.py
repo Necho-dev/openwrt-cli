@@ -83,13 +83,16 @@ def mcp_json(
         )
         return
     if info["format"] == "toml":
-        app.console.print(info["snippet"], end="" if str(info["snippet"]).endswith("\n") else "\n")
+        typer.echo(info["snippet"], nl=False)
     else:
         app.console.print_json(data=info["snippet"])
     if add:
         app.console.print(add)
     if _warnings():
-        app.console.print(f"[warning]⚠ {t('mcp.prompt.extra_missing')}[/warning]")
+        if info["format"] == "toml":
+            typer.echo(t("mcp.prompt.extra_missing"), err=True)
+        else:
+            app.console.print(f"[warning]⚠ {t('mcp.prompt.extra_missing')}[/warning]")
 
 
 @mcp_app.command("prompt", help=_("help.mcp.prompt"))
@@ -110,7 +113,7 @@ def mcp_prompt_cmd(
             app.format,
         )
         return
-    app.console.print(text)
+    app.console.print(text, markup=False, highlight=False, soft_wrap=True)
 
 
 @mcp_app.command("privilege", help=_("help.mcp.privilege"))

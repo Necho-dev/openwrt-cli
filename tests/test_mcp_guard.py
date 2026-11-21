@@ -71,7 +71,7 @@ def test_privilege_command_highlights_effective_mode(tmp_path):
     shown = runner.invoke(app, ["--config", str(cfg), "--json", "mcp", "privilege"])
     assert shown.exit_code == 0, shown.stdout
     body = json.loads(shown.stdout)
-    assert body["mode"] == "readwrite"
+    assert body["mode"] == "readonly"
     names = [row["tool"] for row in body["tools"]]
     assert "system.reboot" not in names
     assert "user.add" not in names
@@ -79,7 +79,7 @@ def test_privilege_command_highlights_effective_mode(tmp_path):
     assert wifi["readonly"] is False and wifi["readwrite"] is True
     text = runner.invoke(app, ["--config", str(cfg), "mcp", "privilege"])
     assert text.exit_code == 0, text.stdout
-    assert "● readwrite" in text.stdout
+    assert "● readonly" in text.stdout
     assert "✓" in text.stdout
     assert "✗" in text.stdout
     assert "wifi_set" in text.stdout

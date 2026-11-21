@@ -14,6 +14,28 @@ The English section becomes the GitHub Release body, with a link to the Chinese 
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-11-21
+
+### Added
+
+- Add a permanent TUI Settings tab for language, MCP permissions, profile management, sampling, and local runtime logs.
+- Add `openwrt sample config show/set` and `sample run` for configuring and running sampling without the TUI. The foreground runner supports profile selection, JSON Lines, and optional streaming of newly stored router logs.
+- Collect OpenWrt system and kernel logs and network metrics into `~/.openwrt/data.db`. Enable PassWall2 runtime and ACL logs or Bandix metrics on routers that support them.
+- Add the read-only MCP tool `samples_query` for local sampling history by profile, source, and time, with recorded coverage and gaps.
+- Record TUI, MCP, and sampler runtime events in `~/.openwrt/logs/`. Settings → Logs displays recent events and supports retention days and manual archive cleanup. MCP call logs contain metadata only.
+
+### Improved
+
+- Use `~/.openwrt/config.yaml` by default. Automatically copy a legacy configuration when the new default path is absent. Explicit paths still take precedence.
+- Confirm TUI language, global MCP mode, and active profile changes before applying them. Connect to the target router before changing the active profile.
+- Keep checkpoints per router and log source so sampling can resume across TUI sessions. Record log rollovers, ambiguous overlap, and collection errors.
+
+### Fixed
+
+- Enforce the global MCP mode as a permission ceiling. A profile set to `readwrite` cannot grant writes while the global mode is `readonly`.
+- Return a time-validation error for malformed log query timestamps.
+- Keep sampled logs, metric revisions, coverage, and gaps stable across cursor pages while collection continues.
+
 ## [1.3.1] - 2026-11-20
 
 ### Added

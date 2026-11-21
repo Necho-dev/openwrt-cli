@@ -109,7 +109,12 @@ def setup_passwall2_tables(app) -> None:
         ("pw2-acl-table", (t("col.section"), t("col.enabled"), t("col.remarks"), t("col.sources"), t("col.node"))),
     ):
         table = app.query_one(f"#{tid}", DataTable)
-        table.add_columns(*cols)
+        if table.columns:
+            for column, title in zip(table.columns.values(), cols, strict=True):
+                column.label = Text(title)
+            table.refresh(layout=True)
+        else:
+            table.add_columns(*cols)
         table.cursor_type = "row"
         table.zebra_stripes = True
 

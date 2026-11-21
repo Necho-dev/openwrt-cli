@@ -4,28 +4,37 @@ import re
 import time
 import unicodedata
 from collections import deque
+from collections.abc import Callable
 
 from rich.text import Text
 from textual import events, work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
+from textual.css.query import NoMatches
 from textual.screen import ModalScreen
 from textual.widgets import Button, DataTable, Footer, Input, Link, OptionList, RichLog, Static, TabbedContent, TabPane
 from textual.widgets._footer import FooterKey
 from textual.widgets.option_list import Option
+from textual.worker import get_current_worker
 
 from openwrt_cli.core.device import DeviceClient
+from openwrt_cli.core.config import ConfigManager, add_profile, delete_profile, find_profile, profile_target, update_profile
+from openwrt_cli.core.sampling_config import sampling_settings
 from openwrt_cli.services.monitor import MonitorService
 from openwrt_cli.services.bandix import BandixService, downsample_metrics, norm_mac
 from openwrt_cli.services.network import NetworkService, _fmt_bytes, _fmt_rate, is_physical_device
 from openwrt_cli.services.service import ServiceService
 from openwrt_cli.services.system import SystemService, format_log_line
+from openwrt_cli.services.sampler import Sampler, acl_catalog
+from openwrt_cli.services.sample_store import SampleWriterBusy
+from openwrt_cli.services.runtime_logs import RuntimeLog
 from openwrt_cli.tui.bandwidth import BandwidthPanel, DualRateChart
 from openwrt_cli.tui.charts import WINDOW, AreaChart, Series, fmt_bytes_rate, render_legend
 from openwrt_cli.tui.load import LoadPanel
 from openwrt_cli.tui.keyhint import highlight_keys
 from openwrt_cli.tui.optional import probe_optional_apps
+from openwrt_cli.tui.screens.settings import SamplingHistory, SettingsPane
 from openwrt_cli.tui.screens.passwall2 import (
     PW2_CSS,
     PW2_SUBS,
@@ -45,7 +54,7 @@ from openwrt_cli.tui.screens.passwall2 import (
     shunt_row,
     subscribe_row,
 )
-from openwrt_cli.i18n import _, t
+from openwrt_cli.i18n import _, current_language, set_language, t
 from openwrt_cli.ui.logo import render_logo_compact
 from openwrt_cli.ui.render import clip_mid, display_iface, display_route_iface
 from openwrt_cli.version import GITHUB_ICON, REPO_URL, display_version
@@ -630,26 +639,35 @@ class ConfirmModal(ModalScreen[bool]):
         Binding("escape", "cancel", _("action.cancel"), show=False),
         Binding("n", "cancel", _("action.cancel"), show=False),
         Binding("y", "ok", _("action.confirm"), show=False),
-        Binding("enter", "ok", _("action.confirm"), show=False),
+        Binding("enter", "confirm_default", _("action.confirm"), show=False),
     ]
 
-    def __init__(self, message: str) -> None:
+    def __init__(self, message: str, *, explicit: bool = False) -> None:
         super().__init__()
         self.message = message
+        self.explicit = explicit
 
     def compose(self) -> ComposeResult:
         with Vertical(id="confirm-box"):
             yield Static(self.message, id="confirm-msg", markup=False)
-            yield Static(highlight_keys(t("confirm.hint")), id="confirm-hint")
+            yield Static(highlight_keys(t("settings.confirm_keys" if self.explicit else "confirm.hint")), id="confirm-hint")
             with Horizontal(id="confirm-btns"):
                 yield Button(t("action.cancel"), id="cancel")
-                yield Button(t("action.confirm"), id="ok", variant="error")
+                yield Button(t("action.confirm"), id="ok", variant="success" if self.explicit else "error")
+
+    def on_mount(self) -> None:
+        if self.explicit:
+            self.query_one("#cancel", Button).focus()
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         self.dismiss(event.button.id == "ok")
 
     def action_ok(self) -> None:
         self.dismiss(True)
+
+    def action_confirm_default(self) -> None:
+        if not self.explicit or self.query_one("#ok", Button).has_focus:
+            self.action_ok()
 
     def action_cancel(self) -> None:
         self.dismiss(False)
@@ -751,8 +769,6 @@ class AccountSwitchModal(ModalScreen[str | None]):
         self.active = active
 
     def compose(self) -> ComposeResult:
-        from openwrt_cli.core.config import profile_target
-
         with Vertical(id="acct-box"):
             yield Static(t("profiles.switch_title"), id="acct-title")
             options = []
@@ -903,6 +919,7 @@ class OpenWrtTUI(App):
         Binding("5", "show_tab('process')", _("tab.process"), show=False),
         Binding("6", "show_tab('logs')", _("tab.logs"), show=False),
         Binding("7", "show_tab('passwall2')", _("tab.passwall2"), show=False),
+        Binding("8", "show_tab('settings')", _("tab.settings"), show=False),
         Binding("left_square_bracket", "pw2_prev_sub", _("pw2.sub.nodes"), show=False),
         Binding("right_square_bracket", "pw2_next_sub", _("pw2.sub.subscribe"), show=False),
         Binding("p", "pw2_ping('icmp')", _("col.ping"), show=False),
@@ -920,10 +937,16 @@ class OpenWrtTUI(App):
         Binding("u", "switch_account", _("action.switch_profile")),
     ]
 
-    def __init__(self, device: DeviceClient, cfg: dict | None = None):
+    def __init__(self, device: DeviceClient, cfg: dict | None = None, *, journal: RuntimeLog | None = None):
         super().__init__()
         self.device = device
         self.cfg = cfg if isinstance(cfg, dict) else {}
+        self.journal = journal
+        self.sampler = Sampler(journal=journal)
+        self.sampler.configure(self.cfg)
+        self._sample_busy_notified = False
+        self.sample_bandix = False
+        self.sample_acls: list[dict] = []
         self._l1: deque[float] = deque(maxlen=WINDOW)
         self._l5: deque[float] = deque(maxlen=WINDOW)
         self._l15: deque[float] = deque(maxlen=WINDOW)
@@ -999,25 +1022,25 @@ class OpenWrtTUI(App):
             with TabPane(t("tab.overview"), id="overview"):
                 with Vertical(id="rt-stack"):
                     with Vertical(id="load-block", classes="chart-block"):
-                        yield Static(t("section.load"), classes="chart-title")
+                        yield Static(t("section.load"), classes="chart-title", id="load-title")
                         yield LoadPanel(id="load-panel")
                     with Vertical(id="bw-block", classes="chart-block"):
-                        yield Static(t("section.bandwidth"), classes="chart-title")
+                        yield Static(t("section.bandwidth"), classes="chart-title", id="bw-title")
                         yield BandwidthPanel(id="bw-panel")
                     with Vertical(id="conn-block", classes="chart-block"):
-                        yield Static(t("section.connections"), classes="chart-title")
+                        yield Static(t("section.connections"), classes="chart-title", id="conn-title")
                         yield AreaChart(kind="conn", style="stack", id="conn-chart")
                         yield Static("", id="conn-legend", classes="legend")
             with TabPane(t("tab.network"), id="network"):
                 with Vertical(id="net-stack"):
                     with Vertical(id="ifaces-block", classes="net-block"):
-                        yield Static(t("section.interfaces"), classes="chart-title")
+                        yield Static(t("section.interfaces"), classes="chart-title", id="ifaces-title")
                         yield DataTable(id="net-table")
                     with Vertical(id="routes-block", classes="net-block"):
-                        yield Static(t("section.routes"), classes="chart-title")
+                        yield Static(t("section.routes"), classes="chart-title", id="routes-title")
                         yield DataTable(id="route-table")
                     with Vertical(id="rules-block", classes="net-block"):
-                        yield Static(t("section.rules"), classes="chart-title")
+                        yield Static(t("section.rules"), classes="chart-title", id="rules-title")
                         yield DataTable(id="rule-table")
             with TabPane(t("tab.neighbors"), id="leases"):
                 with Vertical(id="lease-stack"):
@@ -1038,6 +1061,8 @@ class OpenWrtTUI(App):
             for extra in self._optional:
                 with TabPane(extra.tab_title(), id=extra.id):
                     yield from extra.compose()
+            with TabPane(t("tab.settings"), id="settings"):
+                yield SettingsPane()
         with Horizontal(id="filter-bar"):
             yield Input(placeholder=t("placeholder.filter"), id="filter-input")
             yield Static("", id="filter-count")
@@ -1050,6 +1075,22 @@ class OpenWrtTUI(App):
             yield Link(GITHUB_ICON, url=REPO_URL, tooltip=REPO_URL, id="footer-gh")
 
     def on_mount(self) -> None:
+        self.log_event("tui.started")
+        self._setup_tables()
+        if self._pw2:
+            setup_passwall2_tables(self)
+        self.query_one("#filter-bar").display = False
+        self._update_footer_edit()
+        self.set_interval(3.0, self.refresh_overview)
+        self.set_interval(3.0, self.refresh_process)
+        self.set_interval(2.0, self.refresh_logs)
+        self.set_interval(1.0, self._refresh_sampling_status)
+        if sampling_settings(self.cfg, self.cfg.get("active"))["on_start"]:
+            self.sampler.start()
+        self.refresh_data()
+        self.refresh_logs()
+
+    def _setup_tables(self) -> None:
         for tid, cols in (
             ("net-table", (t("col.interface"), t("col.protocol"), t("col.carrier"), t("col.uptime"), t("col.mac"), t("col.ipv4"), t("col.ipv6"), t("col.rx"), t("col.tx"))),
             ("lease-table", (t("col.ip"), t("col.mac"), t("col.interface"), t("col.vendor"), t("col.connections"), t("col.received"), t("col.sent"), t("col.inbound"), t("col.outbound"))),
@@ -1059,24 +1100,191 @@ class OpenWrtTUI(App):
             ("rule-table", (t("col.rule"), t("col.priority"), t("col.ingress"), t("col.source"), t("col.src_port"), t("col.action"), t("col.ip_protocol"), t("col.egress"), t("col.destination"), t("col.dst_port"), t("col.table"))),
         ):
             table = self.query_one(f"#{tid}", DataTable)
-            table.add_columns(*cols)
+            if table.columns:
+                for column, title in zip(table.columns.values(), cols, strict=True):
+                    column.label = Text(title)
+                table.refresh(layout=True)
+            else:
+                table.add_columns(*cols)
             table.cursor_type = "row"
             table.zebra_stripes = True
+
+    def _refresh_sampling_status(self) -> None:
+        busy = self.sampler.status.error == SampleWriterBusy.__name__
+        if busy and not self._sample_busy_notified:
+            self.notify(t("sample.tui_busy"), severity="warning")
+        self._sample_busy_notified = busy
+        if self._pane != "settings":
+            return
+        try:
+            if self.query_one("#settings-tabs", TabbedContent).active == "settings-sample":
+                self.query_one(SettingsPane).refresh_status()
+        except NoMatches:
+            # A queued tick may run while Settings is retranslated or unmounted.
+            return
+
+    def show_sampling_history(self) -> None:
+        self.push_screen(SamplingHistory(self.sampler.store, self.cfg, self.device, self.sample_bandix))
+
+    @work(thread=True, exclusive=True, group="sample-capabilities")
+    def refresh_sample_capabilities(self) -> None:
+        device = self.device
+        passwall = self._pw2
+        try:
+            device.ubus.call("luci.bandix", "getStatus", timeout=5)
+            bandix = True
+        except Exception:
+            bandix = False
+        try:
+            rows = acl_catalog(device.uci.show("passwall2")) if passwall else []
+        except Exception:
+            rows = []
+
+        def apply() -> None:
+            if device is self.device:
+                self.sample_bandix = bandix
+                self.sample_acls = rows
+                self.query_one(SettingsPane).refresh_capabilities()
+
+        self.call_from_thread(apply)
+
+    def log_event(self, event: str, **fields) -> None:
+        if self.journal is not None:
+            self.journal.emit("tui", event, profile=self.cfg.get("active"), **fields)
+
+    def save_settings(self, values: dict) -> bool:
+        operation = next(iter(values)) if len(values) == 1 else "settings"
+        try:
+            manager = ConfigManager(self.cfg.get("_config_path"))
+            latest = manager.load()
+            latest.update(values)
+            manager.save(latest)
+        except Exception as exc:
+            self.log_event("tui.config_save_failed", level="ERROR", operation=operation, error=type(exc).__name__)
+            self.notify(t("settings.save_error", error=type(exc).__name__), severity="error")
+            return False
+        self.cfg.update(values)
+        self.log_event("tui.config_saved", operation=operation)
+        self.notify(t("settings.saved"))
+        return True
+
+    def change_mcp_mode(self, mode: str) -> None:
+        if mode in {"readonly", "readwrite"}:
+            previous = (self.cfg.get("mcp") or {}).get("mode", "readonly")
+            if self.save_settings({"mcp": {**self.cfg.get("mcp", {}), "mode": mode}}):
+                self.log_event("tui.mcp_mode_changed", previous=previous if previous in {"readonly", "readwrite"} else "invalid",
+                               target=mode)
+
+    async def change_language(self, language: str) -> None:
+        previous = current_language()
+        if previous == language or not self.save_settings({"language": language}):
+            return
+        set_language(language)
+        self.log_event("tui.language_changed", previous=previous, target=language)
+        tabs = self.query_one("#tabs", TabbedContent)
+        for tab in ("overview", "network", "leases", "services", "process", "logs", "passwall2", "settings"):
+            if tab == "passwall2" and not self._pw2:
+                continue
+            tabs.get_tab(tab).label = t(f"tab.{'neighbors' if tab == 'leases' else tab}")
+        self._setup_tables()
         if self._pw2:
             setup_passwall2_tables(self)
-        self.query_one("#filter-bar").display = False
+            pw2 = self.query_one("#pw2-tabs", TabbedContent)
+            for tab in ("nodes", "subscribe", "settings", "rules", "acl", "logs"):
+                pane_id = f"pw2-{tab}" if tab != "settings" else "pw2-settings-tab"
+                pw2.get_tab(pane_id).label = t(f"pw2.sub.{tab}")
+        for widget_id, key in (("load-title", "section.load"), ("bw-title", "section.bandwidth"),
+                               ("conn-title", "section.connections"), ("ifaces-title", "section.interfaces"),
+                               ("routes-title", "section.routes"), ("rules-title", "section.rules")):
+            self.query_one(f"#{widget_id}", Static).update(t(key))
+        pane = self.query_one(SettingsPane)
+        selected = pane.query_one("#settings-tabs", TabbedContent).active
+        profile = pane.selected_profile()
+        await pane.recompose()
+        pane.refresh_preferences(profile=profile["name"] if profile else None)
+        pane.query_one("#settings-tabs", TabbedContent).active = selected
+        pane.refresh_capabilities(switched=True)
+        pane.refresh_status()
+        pane.focus_page()
+        edit = self.query_one("#footer-edit", Horizontal)
+        await edit.remove_children()
+        await edit.mount(_footer_edit_key())
         self._update_footer_edit()
-        self.set_interval(3.0, self.refresh_overview)
-        self.set_interval(3.0, self.refresh_process)
-        self.set_interval(2.0, self.refresh_logs)
-        self.refresh_data()
-        self.refresh_logs()
+        self.refresh_bindings()
+        self._set_filter_hint()
+        self.refresh_overview()
+
+    def apply_profile(self, original: str | None, draft: dict | None) -> None:
+        if draft is None:
+            return
+        if original is not None and original == self.cfg.get("active"):
+            self.notify(t("settings.active_locked"), severity="warning")
+            return
+        try:
+            manager = ConfigManager(self.cfg.get("_config_path"))
+            latest = manager.load()
+            if original is None:
+                add_profile(latest, draft["name"], draft["fields"], mcp_mode_value=draft["mcp"])
+            else:
+                update_profile(latest, original, draft["fields"], new_name=draft["name"], mcp_mode_value=draft["mcp"])
+                self._move_profile_sampling(latest, original, draft["name"])
+            manager.save(latest)
+        except Exception as exc:
+            self.notify(t("settings.profile_error", error=str(exc)), severity="error")
+            return
+        self._refresh_saved_profiles(latest, draft["name"])
+
+    def confirm_profile_delete(self, name: str) -> None:
+        if name == self.cfg.get("active"):
+            self.notify(t("settings.active_locked"), severity="warning")
+            return
+        self.push_screen(ConfirmModal(t("settings.confirm_delete", name=name)),
+                         lambda accepted: self._delete_profile(name) if accepted else None)
+
+    def _delete_profile(self, name: str) -> None:
+        if name == self.cfg.get("active"):
+            self.notify(t("settings.active_locked"), severity="warning")
+            return
+        try:
+            manager = ConfigManager(self.cfg.get("_config_path"))
+            latest = manager.load()
+            delete_profile(latest, name)
+            self._move_profile_sampling(latest, name, None)
+            manager.save(latest)
+        except Exception as exc:
+            self.notify(t("settings.profile_error", error=str(exc)), severity="error")
+            return
+        self._refresh_saved_profiles(latest)
+
+    @staticmethod
+    def _move_profile_sampling(config: dict, name: str, replacement: str | None) -> None:
+        options = config.get("sampling")
+        profiles = options.get("profiles") if isinstance(options, dict) else None
+        if isinstance(profiles, dict) and name in profiles:
+            settings = profiles.pop(name)
+            if replacement is not None:
+                profiles[replacement] = settings
+
+    def _refresh_saved_profiles(self, latest: dict, preferred: str | None = None) -> None:
+        self.cfg["profiles"] = latest["profiles"]
+        if "sampling" in latest:
+            self.cfg["sampling"] = latest["sampling"]
+        self.query_one(SettingsPane).refresh_profiles(preferred)
+        self.notify(t("settings.saved"))
 
     def action_refresh(self) -> None:
         if self._pane == "passwall2":
             self._pw2_reload()
             return
         self.refresh_data()
+
+    def check_action(self, action: str, parameters: tuple[object, ...]) -> bool:
+        if action in {"filter", "refresh"} and getattr(self, "_pane", None) == "settings":
+            try:
+                return self.query_one("#settings-tabs", TabbedContent).active != "settings-logs"
+            except NoMatches:
+                return True
+        return True
 
     def _typing_filter(self) -> bool:
         bar = self.query_one("#filter-bar")
@@ -1161,6 +1369,8 @@ class OpenWrtTUI(App):
             self.notify(t("help.neigh_keys"))
         elif self._pane == "passwall2":
             self.notify(t("help.pw2.keys"))
+        elif self._pane == "settings":
+            self.notify(self.query_one(SettingsPane).help_text())
         else:
             self.notify(t("help.generic"))
 
@@ -1174,49 +1384,80 @@ class OpenWrtTUI(App):
         self.push_screen(AccountSwitchModal(profiles, self.cfg.get("active")), self._on_account_picked)
 
     def _on_account_picked(self, name: str | None) -> None:
-        if not name or name == self.cfg.get("active"):
+        if name:
+            self.confirm_profile_switch(name)
+
+    def confirm_setting(self, message: str, apply: Callable[[], None]) -> None:
+        if len(self.screen_stack) == 1:
+            self.push_screen(ConfirmModal(message, explicit=True), lambda accepted: apply() if accepted else None)
+
+    def confirm_profile_switch(self, name: str, connect: Callable[[str], object] | None = None) -> None:
+        profile = find_profile(self.cfg, name)
+        current = self.cfg.get("active")
+        if profile is None or name == current:
             return
-        self._switch_account(name)
+        start = connect or self._switch_account
+        self.confirm_setting(t("settings.confirm_switch", current=current or "—", target=name,
+                               endpoint=profile_target(profile)), lambda: start(name))
 
     @work(thread=True, exclusive=True, group="switch-account")
     def _switch_account(self, name: str) -> None:
-        from openwrt_cli.core.config import ConfigManager, ProfileError, activate_profile, connection_for
+        from openwrt_cli.core.config import activate_profile, connection_for
         from openwrt_cli.core.connection import open_connection
 
+        worker = get_current_worker()
+        device = None
+        previous = self.cfg.get("active")
+        self.log_event("tui.profile_switch_started", target=name)
         try:
             trial = connection_for(self.cfg, name)
             device = open_connection(trial)
             apps = probe_optional_apps(device)
         except Exception as exc:
-            self.call_from_thread(self.notify, t("msg.connect_fail", error=exc), severity="error")
+            self.log_event("tui.profile_switch_failed", level="ERROR", target=name, operation="connect",
+                           error=type(exc).__name__)
+            if device is not None:
+                device.close()
+            if not worker.is_cancelled:
+                self.call_from_thread(self.notify, t("msg.connect_fail", error=exc), severity="error")
             return
 
         def apply() -> None:
-            previous = self.cfg.get("active")
+            if worker.is_cancelled:
+                device.close()
+                return
             try:
-                activate_profile(self.cfg, name)
-                ConfigManager(self.cfg.get("_config_path")).save(self.cfg)
-            except (ProfileError, OSError, Exception) as exc:
-                if previous:
-                    self.cfg["active"] = previous
-                try:
-                    activate_profile(self.cfg, str(previous)) if previous else None
-                except ProfileError:
-                    pass
-                try:
-                    device.close()
-                except Exception:
-                    pass
+                updated = ConfigManager(self.cfg.get("_config_path")).load()
+                activate_profile(updated, name)
+                updated["_config_path"] = self.cfg.get("_config_path")
+                fields = ("host", "port", "transport", "scheme", "user", "password", "identity_file", "verify_ssl")
+                if any(updated.get(field) != trial.get(field) for field in fields):
+                    raise ValueError(t("settings.profile_changed"))
+                ConfigManager(updated["_config_path"]).save(updated)
+            except Exception as exc:
+                self.log_event("tui.profile_switch_failed", level="ERROR", target=name, operation="save",
+                               error=type(exc).__name__)
+                device.close()
                 self.notify(str(exc), severity="error")
                 return
             old = self.device
             self.device = device
+            self.cfg = updated
+            self.log_event("tui.profile_switched", previous=previous, target=name)
+            self.sampler.configure(updated)
             try:
                 old.close()
             except Exception:
                 pass
             self._reset_after_switch()
             self._sync_optional_tabs(apps)
+            self.sample_bandix = False
+            self.sample_acls = []
+            settings = self.query_one(SettingsPane)
+            settings.refresh_profiles(name)
+            settings.refresh_capabilities(switched=True)
+            if self._pane == "settings":
+                self.refresh_sample_capabilities()
             self.query_one("#conn-status", ConnStatus).update(_conn_status(self.device))
             self.refresh_data()
             self.refresh_logs()
@@ -1293,7 +1534,7 @@ class OpenWrtTUI(App):
         want = any(getattr(app, "id", "") == "passwall2" for app in self._optional)
         tabs = self.query_one("#tabs", TabbedContent)
         if want and not self._pw2:
-            tabs.add_pane(PassWall2Pane())
+            tabs.add_pane(PassWall2Pane(), before="settings")
             self._pw2 = True
             self.set_timer(0.05, self._ensure_pw2_tables)
         elif self._pw2 and not want:
@@ -1322,6 +1563,12 @@ class OpenWrtTUI(App):
         self._paint_logs()
 
     def on_tabbed_content_tab_activated(self, event: TabbedContent.TabActivated) -> None:
+        if event.tabbed_content.id == "settings-tabs":
+            if self._pane == "settings":
+                if event.pane.id == "settings-sample":
+                    self.refresh_sample_capabilities()
+                self.query_one(SettingsPane).focus_page()
+            return
         if event.tabbed_content.id == "pw2-tabs":
             self._pw2_sub = event.pane.id if event.pane is not None else "pw2-nodes"
             self._set_filter_hint()
@@ -1350,6 +1597,11 @@ class OpenWrtTUI(App):
             self.refresh_rules()
         elif self._pane == "passwall2":
             self._pw2_reload()
+        elif self._pane == "settings":
+            settings = self.query_one(SettingsPane)
+            if settings.query_one("#settings-tabs", TabbedContent).active == "settings-sample":
+                self.refresh_sample_capabilities()
+            settings.focus_page()
 
     def _set_filter_hint(self) -> None:
         hints = {
@@ -1709,6 +1961,7 @@ class OpenWrtTUI(App):
         if now - self._last_fail_note < 15:
             return
         self._last_fail_note = now
+        self.log_event("tui.refresh_failed", level="WARNING", error=type(exc).__name__)
         self.notify(_short_refresh_error(exc), severity="warning", timeout=4)
 
     def _set_header(self, content) -> None:
@@ -1718,6 +1971,7 @@ class OpenWrtTUI(App):
 
     def _note_session_restored(self) -> None:
         if self._session_lost:
+            self.log_event("tui.connection_restored")
             self._session_lost = False
             self._toast(t("msg.session_restored"))
 
@@ -2110,12 +2364,18 @@ class OpenWrtTUI(App):
             self._load_pw2_logs()
 
     def action_pw2_prev_sub(self) -> None:
+        if self._pane == "settings" and not isinstance(self.focused, Input):
+            self.query_one(SettingsPane).step_page(-1)
+            return
         if self._pane != "passwall2" or not self._pw2:
             return
         idx = PW2_SUBS.index(self._pw2_sub) if self._pw2_sub in PW2_SUBS else 0
         self.query_one("#pw2-tabs", TabbedContent).active = PW2_SUBS[(idx - 1) % len(PW2_SUBS)]
 
     def action_pw2_next_sub(self) -> None:
+        if self._pane == "settings" and not isinstance(self.focused, Input):
+            self.query_one(SettingsPane).step_page(1)
+            return
         if self._pane != "passwall2" or not self._pw2:
             return
         idx = PW2_SUBS.index(self._pw2_sub) if self._pw2_sub in PW2_SUBS else 0
@@ -2513,4 +2773,5 @@ class OpenWrtTUI(App):
         view.write(Text(message, style="bold #ed5c5c"))
 
     def on_unmount(self) -> None:
+        self.sampler.stop()
         self.device.close()

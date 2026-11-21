@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -184,6 +185,21 @@ def test_mcp_json_and_prompt():
     assert oc_body["snippet"]["mcp"]["openwrt"]["command"] == ["openwrt-mcp"]
     wind = runner.invoke(app, ["--json", "mcp", "json", "--client", "windsurf", "--command", "openwrt-mcp"])
     assert _parse(wind.stdout)["snippet"]["mcpServers"]["openwrt"]["command"] == "openwrt-mcp"
+
+
+def test_codex_plain_toml_preserves_header_and_executable(monkeypatch):
+    executable = r"C:\Program Files\openwrt [tools]\python.exe"
+    args = ["-m", "openwrt_cli.mcp"]
+    monkeypatch.setattr("openwrt_cli.mcp.guide.resolve_mcp_launch",
+                        lambda _: {"command": executable, "args": args})
+    monkeypatch.setattr("openwrt_cli.commands.mcp_cmd._warnings", lambda: ["missing MCP extra"])
+    result = runner.invoke(app, ["mcp", "json", "--client", "codex"], env={"COLUMNS": "32"})
+    assert result.exit_code == 0
+    assert tomllib.loads(result.stdout)["mcp_servers"]["openwrt"] == {"command": executable, "args": args}
+    assert result.stderr
+    prompt = runner.invoke(app, ["mcp", "prompt", "--client", "codex"])
+    assert prompt.exit_code == 0
+    assert "[mcp_servers.openwrt]" in prompt.stdout
 
 
 def test_config_set_mcp_mode(tmp_path: Path):

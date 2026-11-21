@@ -266,11 +266,11 @@ def parse_log_time(value: str, *, now: datetime | None = None) -> datetime:
         }[unit]
         return now - delta
     if raw.isdigit():
-        t = int(raw)
-        if t >= 10**11:
-            t = t / 1000
         try:
-            return datetime.fromtimestamp(t)
+            timestamp = int(raw)
+            if timestamp >= 10**11:
+                timestamp = timestamp / 1000
+            return datetime.fromtimestamp(timestamp)
         except (OSError, OverflowError, ValueError) as e:
             raise ValueError(t("err.unix_ts")) from e
     for fmt in _TIME_FORMATS:

@@ -1,4 +1,4 @@
-"""Saved router profiles in ~/.openwrt-cli.yaml. Not router system users."""
+"""Saved router profiles in ~/.openwrt/config.yaml. Not router system users."""
 
 from __future__ import annotations
 

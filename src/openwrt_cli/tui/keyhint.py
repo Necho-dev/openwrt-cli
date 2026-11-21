@@ -3,6 +3,11 @@ from __future__ import annotations
 import re
 
 from rich.text import Text
+from textual.app import ComposeResult
+from textual.containers import Horizontal
+from textual.widgets import Button
+
+from openwrt_cli.i18n import t
 
 KEY_STYLE = "bold #7ec8ff"
 LABEL_STYLE = "#8aa4b8"
@@ -45,3 +50,11 @@ def highlight_keys(text: str) -> Text:
         if rest:
             out.append(rest, style=LABEL_STYLE)
     return out
+
+
+def action_line(*buttons: tuple[str, str, str]) -> ComposeResult:
+    """One row of compact Settings actions, usable with the mouse and keyboard."""
+    with Horizontal(classes="settings-actions"):
+        for button_id, key, label in buttons:
+            caption = Text.assemble((key, KEY_STYLE), (f" · {t(label)}", LABEL_STYLE)) if key else Text(t(label), LABEL_STYLE)
+            yield Button(caption, id=button_id)

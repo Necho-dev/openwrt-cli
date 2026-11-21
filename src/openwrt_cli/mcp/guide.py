@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 from openwrt_cli.i18n import t
 from openwrt_cli.mcp.extra import mcp_extra_installed, resolve_mcp_launch
 from openwrt_cli.mcp.targets import CLIENTS, ClientTarget, client_by_id, expand
@@ -20,8 +22,9 @@ def json_snippet(client: str = "generic", command: str | None = None) -> dict:
     fmt = target.mcp_format if target else "json"
     if fmt == "toml":
         args = launch.get("args") or []
-        arg_line = f"\nargs = {args!r}" if args else ""
-        snippet = f"[mcp_servers.openwrt]\ncommand = {launch['command']!r}{arg_line}\n"
+        arg_line = f"\nargs = {json.dumps(args, ensure_ascii=False)}" if args else ""
+        executable = json.dumps(launch["command"], ensure_ascii=False)
+        snippet = f"[mcp_servers.openwrt]\ncommand = {executable}{arg_line}\n"
         return {"client": client, "format": "toml", "snippet": snippet, "entry": entry}
     if fmt == "opencode":
         argv = [launch["command"], *(launch.get("args") or [])]
@@ -74,7 +77,6 @@ def agent_prompt(client: str = "generic", command: str | None = None) -> str:
     if info["format"] == "toml":
         lines.append(str(info["snippet"]).rstrip())
     else:
-        import json
         lines.append(json.dumps(info["snippet"], indent=2, ensure_ascii=False))
     lines.extend(["", t("mcp.prompt.paths")])
     for row in paths:

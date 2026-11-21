@@ -24,6 +24,7 @@ TOOLS: tuple[ToolPrivilege, ...] = (
     ToolPrivilege("system_status", "system.status", "read", "mcp.cap.system_status"),
     ToolPrivilege("system_processes", "system.processes", "read", "mcp.cap.system_processes"),
     ToolPrivilege("logs_read", "logs.read", "read", "mcp.cap.logs_read"),
+    ToolPrivilege("samples_query", "samples.query", "read", "mcp.cap.samples_query"),
     ToolPrivilege("network_overview", "network.overview", "read", "mcp.cap.network_overview"),
     ToolPrivilege("network_neighbors", "network.neighbors", "read", "mcp.cap.network_neighbors"),
     ToolPrivilege("network_leases", "network.leases", "read", "mcp.cap.network_leases"),

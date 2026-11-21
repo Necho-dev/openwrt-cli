@@ -147,6 +147,19 @@ def test_profile_argument_is_per_call(tmp_path: Path, monkeypatch: pytest.Monkey
     monkeypatch.setattr("openwrt_cli.mcp.session.open_connection", fake_open)
     session = McpSession(str(path))
 
+    def unexpected_write(_client):
+        raise AssertionError("blocked writes must not reach services")
+
+    for profile in (None, "home"):
+        blocked = session.invoke("network.reload", unexpected_write, profile=profile)
+        assert blocked["error"] == "mcp_readonly"
+        assert blocked["profile"] == "home"
+    assert opened == []
+
+    cfg = session.load_cfg()
+    cfg["mcp"]["mode"] = "readwrite"
+    ConfigManager(str(path)).save(cfg)
+
     home = session.invoke("doctor", lambda c: CommandResult.ok_data({"host": c.host}, transport="ssh"))
     assert home["profile"] == "home"
     assert home["host"] == "192.0.2.1"
@@ -207,6 +220,12 @@ def test_profile_argument_is_per_call(tmp_path: Path, monkeypatch: pytest.Monkey
     assert current.data["name"] == "home"
     assert current.data["current"] is True
     assert current.data["mcp_effective"] == "readwrite"
+
+    cfg["mcp"]["mode"] = "readonly"
+    ConfigManager(str(path)).save(cfg)
+    blocked = session.invoke("network.reload", unexpected_write, profile="home")
+    assert blocked["error"] == "mcp_readonly"
+    assert clients["192.0.2.1"].closed is False
 
     barrier = threading.Barrier(2)
 

@@ -139,7 +139,7 @@ def test_mcp_mode_readwrite_and_invalid():
     assert exc.value.mode == "full"
 
 
-def test_account_mcp_overrides_global_and_inherit_clears_it():
+def test_account_mcp_is_capped_by_global_and_inherit_clears_setting():
     cfg = normalize_config({
         "mcp": {"mode": "readonly"},
         "active": "lab",
@@ -148,18 +148,22 @@ def test_account_mcp_overrides_global_and_inherit_clears_it():
             {"name": "lab", "host": "192.0.2.2", "mcp": {"mode": "readwrite"}},
         ],
     })
-    assert mcp_mode(cfg) == "readwrite"
+    assert mcp_mode(cfg) == "readonly"
     assert mcp_mode(cfg, cfg["profiles"][0]) == "readonly"
     assert public_config(cfg)["mcp"]["mode"] == "readonly"
-    assert public_config(cfg)["mcp"]["effective"] == "readwrite"
+    assert public_config(cfg)["mcp"]["effective"] == "readonly"
     shown = public_profiles(cfg)
     assert shown["profiles"][0]["mcp_effective"] == "readonly"
     assert "mcp" not in shown["profiles"][0]
     assert shown["profiles"][1]["mcp"]["mode"] == "readwrite"
-    assert shown["profiles"][1]["mcp_effective"] == "readwrite"
+    assert shown["profiles"][1]["mcp_effective"] == "readonly"
+    cfg["mcp"]["mode"] = "readwrite"
+    assert mcp_mode(cfg) == "readwrite"
+    update_profile(cfg, "lab", {}, mcp_mode_value="readonly")
+    assert mcp_mode(cfg) == "readonly"
     update_profile(cfg, "lab", {}, mcp_mode_value="inherit")
     assert "mcp" not in find(cfg, "lab")
-    assert mcp_mode(cfg) == "readonly"
+    assert mcp_mode(cfg) == "readwrite"
 
 
 def test_illegal_global_rejected_even_when_account_overrides():

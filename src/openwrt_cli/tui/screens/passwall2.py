@@ -17,6 +17,7 @@ from textual.widgets import Button, DataTable, Input, RichLog, Select, Static, T
 from openwrt_cli.core.device import DeviceClient
 from openwrt_cli.i18n import t
 from openwrt_cli.services.passwall2 import format_uci_value, parse_geo_rules, summarize_list, uci_label
+from openwrt_cli.tui.data_table import RefreshingDataTable
 from openwrt_cli.tui.keyhint import highlight_keys
 
 _MULTILINE_OPTS = frozenset({"domain_list", "ip_list", "sources"})
@@ -62,23 +63,23 @@ def compose_passwall2() -> ComposeResult:
     with TabbedContent(id="pw2-tabs"):
         with TabPane(t("pw2.sub.nodes"), id="pw2-nodes"):
             with Horizontal(id="pw2-node-split"):
-                yield DataTable(id="pw2-node-table")
+                yield RefreshingDataTable(id="pw2-node-table")
                 yield Static(t("pw2.pick_node"), id="pw2-node-detail")
         with TabPane(t("pw2.sub.subscribe"), id="pw2-subscribe"):
             with Horizontal(id="pw2-sub-split"):
-                yield DataTable(id="pw2-sub-table")
+                yield RefreshingDataTable(id="pw2-sub-table")
                 yield Static(t("pw2.pick_sub"), id="pw2-sub-detail")
         with TabPane(t("pw2.sub.settings"), id="pw2-settings-tab"):
             yield Static("", id="pw2-settings")
         with TabPane(t("pw2.sub.rules"), id="pw2-rules"):
             with Vertical(id="pw2-rules-body"):
                 with Horizontal(id="pw2-rule-split"):
-                    yield DataTable(id="pw2-rule-table")
+                    yield RefreshingDataTable(id="pw2-rule-table")
                     yield Static(t("pw2.pick_rule"), id="pw2-rule-detail")
                 yield Static("", id="pw2-rules-geo")
         with TabPane(t("pw2.sub.acl"), id="pw2-acl"):
             with Horizontal(id="pw2-acl-split"):
-                yield DataTable(id="pw2-acl-table")
+                yield RefreshingDataTable(id="pw2-acl-table")
                 yield Static(t("pw2.pick_acl"), id="pw2-acl-detail")
         with TabPane(t("pw2.sub.logs"), id="pw2-logs"):
             yield RichLog(id="pw2-log", highlight=False, markup=False, wrap=True, max_lines=400)

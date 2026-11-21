@@ -4,14 +4,13 @@ import asyncio
 
 from rich.text import Text
 from textual.app import App, ComposeResult
-from textual.widgets import DataTable
-
 from openwrt_cli.tui.app import _same_cell, repaint_datatable
+from openwrt_cli.tui.data_table import RefreshingDataTable
 
 
 class _TableApp(App):
     def compose(self) -> ComposeResult:
-        yield DataTable(id="t")
+        yield RefreshingDataTable(id="t")
 
 
 def test_same_cell_ignores_fresh_text_instances():
@@ -26,7 +25,7 @@ def test_repaint_keeps_scroll_and_cursor():
 
     async def body() -> None:
         async with app.run_test(size=(80, 12)) as pilot:
-            table = app.query_one(DataTable)
+            table = app.query_one(RefreshingDataTable)
             table.cursor_type = "row"
             table.add_columns("PID", "CPU")
             repaint_datatable(table, [(str(i), "0.00%") for i in range(40)])
@@ -50,7 +49,7 @@ def test_repaint_follows_row_without_jumping_the_viewport():
 
     async def body() -> None:
         async with app.run_test(size=(80, 12)) as pilot:
-            table = app.query_one(DataTable)
+            table = app.query_one(RefreshingDataTable)
             table.cursor_type = "row"
             table.add_columns("PID", "CPU")
             repaint_datatable(table, [(str(i), "0.00%") for i in range(40)], follow_row=30)
@@ -63,6 +62,11 @@ def test_repaint_follows_row_without_jumping_the_viewport():
             assert table.cursor_row == 0
             assert table.scroll_y == scroll_y
             assert table.get_row_at(0)[0] == "30"
+            table.focus()
+            await pilot.press("down")
+            await pilot.pause()
+            assert table.cursor_row == 1
+            assert table.scroll_y < scroll_y
 
     asyncio.run(body())
 
@@ -72,7 +76,7 @@ def test_repaint_can_drop_rows_without_returning_to_the_top():
 
     async def body() -> None:
         async with app.run_test(size=(80, 12)) as pilot:
-            table = app.query_one(DataTable)
+            table = app.query_one(RefreshingDataTable)
             table.cursor_type = "row"
             table.add_columns("PID", "CPU")
             repaint_datatable(table, [(str(i), "0.00%") for i in range(40)], follow_row=24)

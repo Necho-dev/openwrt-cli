@@ -31,6 +31,7 @@ from openwrt_cli.services.sample_store import SampleWriterBusy
 from openwrt_cli.services.runtime_logs import RuntimeLog
 from openwrt_cli.tui.bandwidth import BandwidthPanel, DualRateChart
 from openwrt_cli.tui.charts import WINDOW, AreaChart, Series, fmt_bytes_rate, render_legend
+from openwrt_cli.tui.data_table import RefreshingDataTable
 from openwrt_cli.tui.load import LoadPanel
 from openwrt_cli.tui.keyhint import highlight_keys
 from openwrt_cli.tui.optional import probe_optional_apps
@@ -171,25 +172,7 @@ def _same_cell(old, new) -> bool:
     return old == new
 
 
-def _restore_table_scroll(table: DataTable, x: float, y: float) -> None:
-    """Put the viewport back after a cursor move.
-
-    DataTable scrolls the cursor into view, and that scroll can be deferred until
-    after the next refresh. Pin once now and once more after that deferred scroll.
-    """
-
-    def pin() -> None:
-        table.scroll_to(x, y, animate=False, immediate=True, force=True)
-
-    pin()
-
-    def pin_after_deferred_scroll() -> None:
-        table.call_after_refresh(pin)
-
-    table.call_after_refresh(pin_after_deferred_scroll)
-
-
-def repaint_datatable(table: DataTable, rows: list[tuple], *, follow_row: int | None = None) -> None:
+def repaint_datatable(table: RefreshingDataTable, rows: list[tuple], *, follow_row: int | None = None) -> None:
     """Refresh a DataTable without clearing it.
 
     ``DataTable.clear()`` resets the scroll offset and repaints an empty table, which
@@ -204,10 +187,7 @@ def repaint_datatable(table: DataTable, rows: list[tuple], *, follow_row: int | 
     existing = [row.key for row in table.ordered_rows]
     incoming = [tuple(row[:width]) for row in rows]
     had_rows = bool(existing)
-    scroll_x, scroll_y = table.scroll_x, table.scroll_y
-    cursor_before = table.cursor_coordinate
-
-    with table.app.batch_update():
+    with table.app.batch_update(), table.preserve_viewport(had_rows):
         limit = min(len(existing), len(incoming))
         for index in range(limit):
             row_key = existing[index]
@@ -223,14 +203,10 @@ def repaint_datatable(table: DataTable, rows: list[tuple], *, follow_row: int | 
         for row_key in existing[len(incoming):]:
             table.remove_row(row_key)
 
-    cursor_moved = table.cursor_coordinate != cursor_before
-    if follow_row is not None and table.row_count:
-        target = max(0, min(follow_row, table.row_count - 1))
-        if table.cursor_row != target:
-            table.move_cursor(row=target, scroll=not had_rows)
-            cursor_moved = True
-    if had_rows and cursor_moved:
-        _restore_table_scroll(table, scroll_x, scroll_y)
+        if follow_row is not None and table.row_count:
+            target = max(0, min(follow_row, table.row_count - 1))
+            if table.cursor_row != target:
+                table.move_cursor(row=target, scroll=not had_rows)
 
 
 def _status_up(up) -> Text:
@@ -1035,26 +1011,26 @@ class OpenWrtTUI(App):
                 with Vertical(id="net-stack"):
                     with Vertical(id="ifaces-block", classes="net-block"):
                         yield Static(t("section.interfaces"), classes="chart-title", id="ifaces-title")
-                        yield DataTable(id="net-table")
+                        yield RefreshingDataTable(id="net-table")
                     with Vertical(id="routes-block", classes="net-block"):
                         yield Static(t("section.routes"), classes="chart-title", id="routes-title")
-                        yield DataTable(id="route-table")
+                        yield RefreshingDataTable(id="route-table")
                     with Vertical(id="rules-block", classes="net-block"):
                         yield Static(t("section.rules"), classes="chart-title", id="rules-title")
-                        yield DataTable(id="rule-table")
+                        yield RefreshingDataTable(id="rule-table")
             with TabPane(t("tab.neighbors"), id="leases"):
                 with Vertical(id="lease-stack"):
-                    yield DataTable(id="lease-table")
+                    yield RefreshingDataTable(id="lease-table")
                     with Vertical(id="bandix-trend"):
                         yield Static(t("trend.all_devices"), id="bandix-title", classes="chart-title")
                         yield DualRateChart(id="bandix-chart")
             with TabPane(t("tab.services"), id="services"):
                 with Horizontal(id="svc-split"):
-                    yield DataTable(id="svc-table")
+                    yield RefreshingDataTable(id="svc-table")
                     yield Static(_svc_pick_detail(), id="svc-detail")
             with TabPane(t("tab.process"), id="process"):
                 with Horizontal(id="proc-split"):
-                    yield DataTable(id="proc-table")
+                    yield RefreshingDataTable(id="proc-table")
                     yield Static(t("proc.pick"), id="proc-detail")
             with TabPane(t("tab.logs"), id="logs"):
                 yield RichLog(id="log-view", highlight=False, markup=False, wrap=True, max_lines=500)
@@ -2200,7 +2176,7 @@ class OpenWrtTUI(App):
         return q in " ".join(_plain(c) for c in row).lower()
 
     def _paint_table(self, table_id: str, rows: list[tuple]) -> None:
-        table = self.query_one(f"#{table_id}", DataTable)
+        table = self.query_one(f"#{table_id}", RefreshingDataTable)
         keep = ""
         keep_col = 0
         if table_id == "svc-table":
